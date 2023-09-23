@@ -12,10 +12,10 @@ fn main() {
     // For each file, check each block's position against the staged file hunks.
     // If a block has changed, add it to a set.
     // For each block in the set, check the on_change target and ensure that it has also changed.
-    dbg!(&file_set);
-    dbg!(&file_set.blocks());
+    // dbg!(&file_set);
+    // dbg!(&file_set.blocks());
 
     let path = Path::new("../test_repo/");
     let file_set = FileSet::parse(path).unwrap();
-    dbg!(&file_set);
+    // dbg!(&file_set);
 }

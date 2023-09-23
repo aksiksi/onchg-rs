@@ -264,17 +264,50 @@ pub struct FileSet {
 }
 
 impl FileSet {
+    pub fn validate(&self) -> Result<()> {
+        let blocks = self.blocks();
+
+        for (path, file) in &self.files {
+            for (name, block) in &file.blocks {
+                match &block.on_change {
+                    BlockTarget::None => {}
+                    BlockTarget::Block { block, file } => {
+                        if let Some(file) = file {
+                            let block_key = (file.as_ref(), block.as_str());
+                            if !blocks.contains_key(&block_key) {
+                                return Err(anyhow::anyhow!(
+                                    r#"block "{}" in file "{}" has invalid OnChange target "{}:{}""#,
+                                    name,
+                                    path.display(),
+                                    file.display(),
+                                    block
+                                ));
+                            }
+                        }
+                    }
+                    BlockTarget::Unset => {
+                        return Err(anyhow::anyhow!(
+                            r#"block "{}" in file "{}" has an invalid OnChange target"#,
+                            block.name,
+                            path.display()
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn parse_staged_files<P: AsRef<Path>>(path: P, is_repo_path: bool) -> Result<Self> {
-        let (staged_files, repo_path) =
+        let (staged_files, repo_path, repo) =
             super::git::get_staged_file_paths(path, is_repo_path).unwrap();
-        // Strip .git folder from path.
-        let root_path = repo_path.parent().unwrap().canonicalize()?;
 
         let mut files = BTreeMap::new();
         let mut file_stack: Vec<PathBuf> = staged_files.clone();
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path.as_path()))?;
+            let (file, files_to_parse) = File::parse(&path, &mut files, Some(repo_path.as_path()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
@@ -288,7 +321,11 @@ impl FileSet {
             num_blocks += file.blocks.len();
         }
 
-        Ok(FileSet { files, num_blocks })
+        crate::git::get_staged_hunks(&repo).unwrap();
+
+        let file_set = FileSet { files, num_blocks };
+        file_set.validate()?;
+        Ok(file_set)
     }
 
     /// Recursively walks through all files in the given path and parses them.
@@ -332,7 +369,9 @@ impl FileSet {
             num_blocks += file.blocks.len();
         }
 
-        Ok(FileSet { files, num_blocks })
+        let file_set = FileSet { files, num_blocks };
+        file_set.validate()?;
+        Ok(file_set)
     }
 
     /// Returns a map of all blocks in the file set.
