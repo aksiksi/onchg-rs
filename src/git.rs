@@ -20,6 +20,8 @@ pub fn get_staged_file_paths<P: AsRef<Path>>(path: P, is_repo_path: bool) -> Res
     Ok((paths, repo.path().to_owned()))
 }
 
+#[allow(dead_code)]
+#[allow(unused_variables)]
 pub fn get_staged_hunks<P: AsRef<Path>>(path: P, is_repo_path: bool) {
-
+    todo!()
 }

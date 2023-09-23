@@ -1,24 +1,30 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+//! The core logic is as follows:
+//!
+//! 1. Parse the file to determine if it contains a OnChange block. This is done
+//!    by processing the file line-by-line and checking against a regex.
+//! 2. If a block is found, parse the block name. If no name is provided, use :default.
+//! 3. Keep parsing until a ThenChange line is found (also using regex). If EOF is
+//!    reached, return an error and terminate.
+//! 4. A file can have mutliple blocks. So, a File struct contains a map of Blocks.
+//! 5. Each block can optionally point to another Block. This is resolved eagerly by
+//!    following the link to the block.
+//!
+//! F1 -> [B1, B2, ..., BN]
+//!             |
+//! F2 -> [B1, B2, ..., BN]
+use std::cell::OnceCell;
+use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use ignore::WalkBuilder;
 use regex::Regex;
 
-/// The core logic is as follows:
-///
-/// 1. Parse the file to determine if it contains a OnChange block. This is done
-///    by processing the file line-by-line and checking against a regex.
-/// 2. If a block is found, parse the block name. If no name is provided, use :default.
-/// 3. Keep parsing until a ThenChange line is found (also using regex). If EOF is
-///    reached, return an error and terminate.
-/// 4. A file can have mutliple blocks. So, a File struct contains a map of Blocks.
-/// 5. Each block can optionally point to another Block. This is resolved eagerly by
-///    following the link to the block.
-///
-/// F1 -> [B1, B2, ..., BN]
-///             |
-/// F2 -> [B1, B2, ..., BN]
+thread_local! {
+    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*OnChange\((.*)\).*$").unwrap());
+    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*ThenChange\((.*)\).*$").unwrap());
+}
 
 #[derive(Clone, Debug)]
 pub enum BlockTarget {
@@ -40,14 +46,13 @@ pub struct Block {
 
 #[derive(Debug)]
 pub struct File {
-    path: PathBuf,
     blocks: HashMap<String, Block>,
 }
 
 impl File {
     fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
         path: P,
-        files: &HashMap<PathBuf, File>,
+        files: &BTreeMap<PathBuf, File>,
         root_path: Option<Q>,
     ) -> Result<(Self, HashSet<PathBuf>)> {
         enum ParseState {
@@ -55,9 +60,9 @@ impl File {
             InBlock,
         }
         let path = path.as_ref();
-
-        let on_change_pat = Regex::new(r".*OnChange\((.*)\).*$").unwrap();
-        let then_change_pat = Regex::new(r".*ThenChange\((.*)\).*$").unwrap();
+        let root_path = root_path
+            .as_ref()
+            .map(|p| p.as_ref().canonicalize().unwrap());
 
         let mut blocks: HashMap<String, Block> = HashMap::new();
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
@@ -71,10 +76,10 @@ impl File {
             let line = line?;
             match state {
                 ParseState::Searching => {
-                    println!("Line: {}", line);
                     // Try to parse the line as a OnChange block.
                     // TODO(aksiksi): OnChange should allow empty OR :<name>.
-                    if let Some(captures) = on_change_pat.captures(&line) {
+                    let captures = ON_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
+                    if let Some(captures) = captures {
                         let mut parsed = String::from(captures.get(1).unwrap().as_str().trim());
                         if parsed.is_empty() {
                             // Unnamed OnChange block.
@@ -112,7 +117,7 @@ impl File {
                     // Try to parse the line as a OnChange block.
                     let block_name = block_name.as_ref();
 
-                    let captures = then_change_pat.captures(&line);
+                    let captures = THEN_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
                     if captures.is_none() {
                         continue;
                     }
@@ -153,24 +158,39 @@ impl File {
                                 file: None,
                             };
                         } else {
-                            println!("Split target: {:?}", split_target);
-
                             // Block target in another file.
                             let file_name = split_target[0].to_string();
                             let mut file_path = PathBuf::from(&file_name);
 
                             if files.get(&file_path).is_none() {
                                 if !file_path.exists() {
-                                    if let Some(root_path) = root_path.as_ref() {
-                                        // Try to join the path with the repo root.
-                                        let root_path = root_path.as_ref();
+                                    let root_with_path = if let Some(root_path) = root_path.as_ref()
+                                    {
                                         if root_path.exists() {
-                                            file_path = root_path.join(file_path);
+                                            Some(root_path.join(&file_path))
+                                        } else {
+                                            None
                                         }
                                     } else {
-                                        // TODO: Otherwise, assume it's a relative path.
+                                        None
+                                    };
+                                    let relative_path = path.parent().unwrap().join(&file_path);
+                                    if root_with_path.is_some()
+                                        && root_with_path.as_ref().unwrap().exists()
+                                    {
+                                        file_path = root_with_path.unwrap();
+                                    } else if relative_path.exists() {
+                                        // Otherwise, assume it's a relative path.
+                                        file_path = relative_path;
+                                    } else {
+                                        return Err(anyhow::anyhow!(
+                                            "file {} does not exist on line {}",
+                                            file_name,
+                                            i + 1
+                                        ));
                                     }
                                 }
+                                file_path = file_path.canonicalize().unwrap();
                                 files_to_parse.insert(file_path.clone());
                             }
 
@@ -191,20 +211,18 @@ impl File {
                             on_change: block_target,
                         },
                     );
+
+                    state = ParseState::Searching;
                 }
             }
         }
 
         match state {
-            ParseState::Searching => {
-                let f = File {
-                    path: path.to_owned(),
-                    blocks,
-                };
-                Ok((f, files_to_parse))
-            }
+            ParseState::Searching => Ok((File { blocks }, files_to_parse)),
+            // If we reach EOF and are not searching for a block, the file is malformed.
             _ => Err(anyhow::anyhow!(
-                "unexpected EOF while looking for ThenChange for block {}",
+                "unexpected EOF in {} while looking for ThenChange for block \":{}\"",
+                path.display(),
                 block_name.unwrap(),
             )),
         }
@@ -213,7 +231,8 @@ impl File {
 
 #[derive(Debug)]
 pub struct FileSet {
-    files: HashMap<PathBuf, File>,
+    files: BTreeMap<PathBuf, File>,
+    num_blocks: usize,
 }
 
 impl FileSet {
@@ -223,25 +242,63 @@ impl FileSet {
         // Strip .git folder from path.
         let root_path = repo_path.parent().unwrap();
 
-        let mut files = HashMap::new();
+        let mut files = BTreeMap::new();
         let mut file_stack: Vec<PathBuf> = staged_files.clone();
 
-        while let Some(f) = file_stack.pop() {
-            let (file, to_parse) = File::parse(f, &mut files, Some(root_path))?;
-            files.insert(file.path.clone(), file);
-            for file_path in to_parse {
+        let mut num_blocks = 0;
+        while let Some(path) = file_stack.pop() {
+            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path))?;
+            num_blocks += file.blocks.len();
+            files.insert(path, file);
+            for file_path in files_to_parse {
                 file_stack.push(file_path);
             }
         }
 
-        Ok(FileSet { files })
+        Ok(FileSet { files, num_blocks })
     }
 
-    pub fn blocks(&self) -> HashMap<(&PathBuf, &str), &Block> {
-        let mut blocks = HashMap::new();
+    pub fn parse<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let root_path = path.as_ref();
+        let mut files = BTreeMap::new();
+        let mut file_stack: Vec<PathBuf> = Vec::new();
+
+        let dir_walker = WalkBuilder::new(root_path).build();
+
+        for entry in dir_walker {
+            match entry {
+                Err(e) => {
+                    println!("Error: {}", e);
+                    continue;
+                }
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        continue;
+                    }
+                    file_stack.push(path.to_owned().canonicalize().unwrap());
+                }
+            }
+        }
+
+        let mut num_blocks = 0;
+        while let Some(path) = file_stack.pop() {
+            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path))?;
+            num_blocks += file.blocks.len();
+            files.insert(path, file);
+            for file_path in files_to_parse {
+                file_stack.push(file_path);
+            }
+        }
+
+        Ok(FileSet { files, num_blocks })
+    }
+
+    pub fn blocks(&self) -> HashMap<(&Path, &str), &Block> {
+        let mut blocks = HashMap::with_capacity(self.num_blocks);
         for (path, file) in self.files.iter() {
             for (name, block) in file.blocks.iter() {
-                blocks.insert((path, name.as_str()), block);
+                blocks.insert((path.as_path(), name.as_str()), block);
             }
         }
         blocks

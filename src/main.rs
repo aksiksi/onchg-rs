@@ -14,4 +14,8 @@ fn main() {
     // For each block in the set, check the on_change target and ensure that it has also changed.
     dbg!(&file_set);
     dbg!(&file_set.blocks());
+
+    let path = Path::new("../test_repo/");
+    let file_set = FileSet::parse(path).unwrap();
+    dbg!(&file_set);
 }

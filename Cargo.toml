@@ -11,4 +11,5 @@ git = ["git2"]
 anyhow = "1.0.75"
 # We only need local Git repo support. Default features enable remote clone & fetch.
 git2 = { version = "0.18", optional = true, default-features = false }
+ignore = "0.4.20"
 regex = "1.9.5"
