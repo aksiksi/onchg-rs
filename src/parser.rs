@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::core::{BlockTarget, FileSet};
+use crate::git::Repo;
 
 #[derive(Debug)]
 pub struct Parser {
@@ -12,11 +13,11 @@ pub struct Parser {
 
 impl Parser {
     pub fn from_git_repo<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let (staged_files, repo_path, repo) =
-            super::git::get_staged_file_paths(&path, false).unwrap();
+        let repo = git2::Repository::discover(path.as_ref())?;
+        let (staged_files, repo_path) = repo.get_staged_files()?;
         let file_set = FileSet::from_files(&staged_files, &repo_path)?;
 
-        let staged_hunks = crate::git::get_staged_hunks(&repo)?;
+        let staged_hunks = repo.get_staged_hunks()?;
         let mut blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
         for (path, hunks) in &staged_hunks {
