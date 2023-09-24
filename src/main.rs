@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 mod core;
 mod git;
+#[cfg(test)]
+mod helpers;
 mod parser;
 
 use clap::Parser as CliParser;

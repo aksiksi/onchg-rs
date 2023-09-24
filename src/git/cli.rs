@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::Result;
 use patch::Patch;
 
-use super::{Hunk, Repo};
+use super::{Hunk, Line, Repo};
 
 pub struct Cli;
 
@@ -86,30 +86,8 @@ impl Repo for Cli {
             let mut hunks = Vec::new();
             for h in diff_file.hunks {
                 let mut hunk = Hunk::from(&h);
-                let (mut old_line, mut new_line) =
-                    (h.old_range.start as u32, h.new_range.start as u32);
                 for line in h.lines {
-                    // Same logic as in the lib module.
-                    match line {
-                        patch::Line::Add(_) => {
-                            hunk.changed_lines.push(new_line);
-                            new_line += 1;
-                            hunk.num_added += 1;
-                        }
-                        patch::Line::Remove(_) => {
-                            hunk.num_removed += 1;
-                            old_line += 1;
-                        }
-                        patch::Line::Context(_) => {
-                            if u32::abs_diff(old_line, new_line)
-                                != u32::abs_diff(hunk.num_added, hunk.num_removed)
-                            {
-                                hunk.changed_lines.push(new_line);
-                            }
-                            old_line += 1;
-                            new_line += 1;
-                        }
-                    }
+                    hunk.handle_line(line.into());
                 }
                 hunks.push(hunk);
             }
@@ -126,9 +104,22 @@ impl From<&patch::Hunk<'_>> for Hunk {
         Self {
             start_line: h.new_range.start as u32,
             end_line: (h.new_range.start + h.new_range.count - 1) as u32,
+            old_start_line: h.old_range.start as u32,
+            old_end_line: (h.old_range.start + h.old_range.count - 1) as u32,
             changed_lines: Vec::new(),
             num_added: 0,
             num_removed: 0,
+            num_context: 0,
+        }
+    }
+}
+
+impl From<patch::Line<'_>> for Line {
+    fn from(value: patch::Line<'_>) -> Self {
+        match value {
+            patch::Line::Add(_) => Line::Add,
+            patch::Line::Remove(_) => Line::Remove,
+            patch::Line::Context(_) => Line::Context,
         }
     }
 }

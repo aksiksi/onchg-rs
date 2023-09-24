@@ -2,18 +2,32 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use git2::{Delta, DiffHunk, Repository, StatusOptions};
+use git2::{Delta, DiffHunk, DiffLine, Repository, StatusOptions};
 
-use super::{Hunk, Repo};
+use super::{Hunk, Line, Repo};
 
 impl From<DiffHunk<'_>> for Hunk {
     fn from(h: DiffHunk<'_>) -> Self {
         Self {
             start_line: h.new_start(),
             end_line: h.new_start() + h.new_lines() - 1,
+            old_start_line: h.old_start(),
+            old_end_line: h.old_start() + h.old_lines() - 1,
             changed_lines: Vec::new(),
             num_added: 0,
             num_removed: 0,
+            num_context: 0,
+        }
+    }
+}
+
+impl From<DiffLine<'_>> for Line {
+    fn from(l: DiffLine<'_>) -> Self {
+        match l.origin() {
+            '+' => Line::Add,
+            '-' => Line::Remove,
+            ' ' => Line::Context,
+            _ => unreachable!(),
         }
     }
 }
@@ -74,7 +88,6 @@ impl Repo for Repository {
                 if !valid {
                     return true;
                 }
-                // Ignore unchanged lines.
                 match line.origin() {
                     '+' | '-' | ' ' => (),
                     _ => return true,
@@ -102,28 +115,7 @@ impl Repo for Repository {
                     .get_mut(&(start_line, end_line))
                     .unwrap();
 
-                // TODO(aksiksi): Explain this logic.
-                let (changed_line, num_added, num_removed) =
-                    match (line.origin(), line.old_lineno(), line.new_lineno()) {
-                        ('+', _, Some(new_line)) => (Some(new_line), 1, 0),
-                        ('-', Some(_), _) => (None, 0, 1),
-                        (' ', Some(old_line), Some(new_line)) => {
-                            if u32::abs_diff(old_line, new_line)
-                                == u32::abs_diff(hunk.num_added, hunk.num_removed)
-                            {
-                                (None, 0, 0)
-                            } else {
-                                (Some(new_line), 0, 0)
-                            }
-                        }
-                        _ => return true,
-                    };
-
-                if let Some(changed_line) = changed_line {
-                    hunk.changed_lines.push(changed_line);
-                }
-                hunk.num_added += num_added;
-                hunk.num_removed += num_removed;
+                hunk.handle_line(line.into());
 
                 true
             }),

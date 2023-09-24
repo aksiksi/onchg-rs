@@ -54,7 +54,6 @@ pub struct File {
 
 impl File {
     fn build_block_target(
-        files: &BTreeMap<PathBuf, File>,
         files_to_parse: &mut HashSet<PathBuf>,
         line_num: usize,
         path: &Path,
@@ -82,37 +81,35 @@ impl File {
                 file: None,
             });
         }
-        // Block target in another file.
-        let mut file_path = PathBuf::from(split_target[0].to_string());
 
-        if files.get(&file_path).is_none() {
-            if !file_path.exists() {
-                let root_with_path = if let Some(root_path) = root_path {
-                    if root_path.exists() {
-                        Some(root_path.join(&file_path))
-                    } else {
-                        None
-                    }
+        // Block target in another file.
+        let mut file_path = PathBuf::from(split_target[0]);
+        if !file_path.exists() {
+            let root_with_path = if let Some(root_path) = root_path {
+                if root_path.exists() {
+                    Some(root_path.join(&file_path))
                 } else {
                     None
-                };
-                let relative_path = path.parent().unwrap().join(&file_path);
-                if root_with_path.is_some() && root_with_path.as_ref().unwrap().exists() {
-                    file_path = root_with_path.unwrap();
-                } else if relative_path.exists() {
-                    // Otherwise, assume it's a relative path.
-                    file_path = relative_path;
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "file {} does not exist on line {}",
-                        file_path.display(),
-                        line_num
-                    ));
                 }
+            } else {
+                None
+            };
+            let relative_path = path.parent().unwrap().join(&file_path);
+            if root_with_path.is_some() && root_with_path.as_ref().unwrap().exists() {
+                file_path = root_with_path.unwrap();
+            } else if relative_path.exists() {
+                // Otherwise, assume it's a relative path.
+                file_path = relative_path;
+            } else {
+                return Err(anyhow::anyhow!(
+                    r#"OnChange target file "{}" does not exist on line {}"#,
+                    file_path.display(),
+                    line_num
+                ));
             }
-            file_path = file_path.canonicalize().unwrap();
-            files_to_parse.insert(file_path.clone());
         }
+        file_path = file_path.canonicalize().unwrap();
+        files_to_parse.insert(file_path.clone());
 
         return Ok(BlockTarget::Block {
             block: block_name.to_string(),
@@ -122,7 +119,6 @@ impl File {
 
     fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
         path: P,
-        files: &BTreeMap<PathBuf, File>,
         root_path: Option<Q>,
     ) -> Result<(Self, HashSet<PathBuf>)> {
         let path = path.as_ref().canonicalize()?;
@@ -228,7 +224,6 @@ impl File {
                     }
 
                     let block_target = Self::build_block_target(
-                        files,
                         &mut files_to_parse,
                         line_num,
                         &path,
@@ -309,11 +304,23 @@ impl FileSet {
     /// Parses a set of files, as well as (recursively) any files referenced by OnChange blocks in the
     /// given set of files.
     pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(paths: &[P], root_path: Q) -> Result<Self> {
+        let root_path = root_path.as_ref();
         let mut files = BTreeMap::new();
-        let mut file_stack: Vec<PathBuf> = paths.iter().map(|p| p.as_ref().to_owned()).collect();
+
+        let mut file_stack: Vec<PathBuf> = paths
+            .iter()
+            .map(|p| {
+                let path = p.as_ref();
+                if path.exists() {
+                    path.to_owned()
+                } else {
+                    root_path.join(path)
+                }
+            })
+            .collect();
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path.as_ref()))?;
+            let (file, files_to_parse) = File::parse(&path, Some(root_path))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
@@ -369,10 +376,12 @@ impl FileSet {
         }
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path.as_path()))?;
+            let (file, files_to_parse) = File::parse(&path, Some(root_path.as_path()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
-                file_stack.push(file_path);
+                if !files.contains_key(&file_path) {
+                    file_stack.push(file_path);
+                }
             }
         }
 
@@ -420,5 +429,76 @@ impl FileSet {
 
     pub fn files(&self) -> Vec<&Path> {
         self.files.keys().map(|p| p.as_path()).collect()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::helpers::TestDir;
+
+    use super::*;
+
+    #[test]
+    fn test_from_directory() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:default)",
+            ),
+            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+        ];
+        let d = TestDir::from_files(files).unwrap();
+        FileSet::from_directory(d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_from_files() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:default)",
+            ),
+            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+        ];
+        let d = TestDir::from_files(files).unwrap();
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        FileSet::from_files(&file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_invalid_block_target_file_path() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f3.txt:default)",
+            ),
+            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+        ];
+        let d = TestDir::from_files(files).unwrap();
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        let res = FileSet::from_files(&file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert_eq!(
+            err,
+            r#"OnChange target file "f3.txt" does not exist on line 4"#
+        );
+    }
+
+    #[test]
+    fn test_from_files_invalid_block_target() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:invalid)",
+            ),
+            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+        ];
+        let d = TestDir::from_files(files).unwrap();
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        let res = FileSet::from_files(&file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("has invalid OnChange target"));
     }
 }

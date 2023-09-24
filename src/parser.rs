@@ -93,3 +93,35 @@ impl Parser {
         self.file_set.files()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::helpers::GitRepo;
+
+    use super::*;
+
+    #[test]
+    fn test_from_git_repo() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+            ),
+            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)\n"),
+        ];
+        let d = GitRepo::from_files(files).unwrap();
+
+        // Delete one line from f1.txt and stage it.
+        d.write_file("f1.txt", "OnChange()\nadadd\nThenChange(f2.txt:default)\n")
+            .unwrap();
+        d.add_all_files().unwrap();
+        // This should fail because f1.txt has changed but f2.txt has not.
+        assert!(Parser::from_git_repo(d.path()).is_err());
+
+        // Now stage the other file and ensure the parser succeeds.
+        d.write_file("f2.txt", "OnChange()\nadadd\nThenChange(f1.txt:default)\n")
+            .unwrap();
+        d.add_all_files().unwrap();
+        assert!(Parser::from_git_repo(d.path()).is_ok());
+    }
+}
