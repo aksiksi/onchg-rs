@@ -19,8 +19,12 @@ impl From<DiffHunk<'_>> for Hunk {
 }
 
 impl Repo for Repository {
-    fn get_staged_files(&self) -> Result<(Vec<PathBuf>, PathBuf)> {
-        let repo_path = self.path().parent().unwrap();
+    fn get_staged_files(&self, repo_path: Option<&Path>) -> Result<(Vec<PathBuf>, PathBuf)> {
+        let repo_path = match repo_path {
+            Some(p) => p,
+            None => self.path().parent().unwrap(),
+        };
+
         let mut opts = StatusOptions::new();
         let mut paths = Vec::new();
         for entry in self
@@ -44,8 +48,12 @@ impl Repo for Repository {
 
     // NOTE(aksiksi): We can probably filter out irrelevant hunks here if we look at
     // the blocks in the FileSet.
-    fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
-        let repo_path = self.path().parent().unwrap();
+    fn get_staged_hunks(&self, repo_path: Option<&Path>) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
+        let repo_path = match repo_path {
+            Some(p) => p,
+            None => self.path().parent().unwrap(),
+        };
+
         let mut hunk_map: BTreeMap<PathBuf, HashMap<(u32, u32), Hunk>> = BTreeMap::new();
         let tree = self.head()?.peel_to_tree()?;
         let diff = self.diff_tree_to_index(Some(&tree), None, None)?;

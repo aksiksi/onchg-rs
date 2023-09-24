@@ -13,11 +13,23 @@ pub struct Parser {
 
 impl Parser {
     pub fn from_git_repo<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let repo = git2::Repository::discover(path.as_ref())?;
-        let (staged_files, repo_path) = repo.get_staged_files()?;
-        let file_set = FileSet::from_files(&staged_files, &repo_path)?;
+        let path = path.as_ref();
 
-        let staged_hunks = repo.get_staged_hunks()?;
+        #[cfg(feature = "git")]
+        let ((staged_files, repo_path), staged_hunks) = {
+            let repo = git2::Repository::discover(path)?;
+            (repo.get_staged_files(None)?, repo.get_staged_hunks(None)?)
+        };
+        #[cfg(not(feature = "git"))]
+        let ((staged_files, repo_path), staged_hunks) = {
+            let c = crate::git::cli::Cli::new();
+            (
+                c.get_staged_files(Some(path))?,
+                c.get_staged_hunks(Some(path))?,
+            )
+        };
+
+        let file_set = FileSet::from_files(&staged_files, &repo_path)?;
         let mut blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
         for (path, hunks) in &staged_hunks {
