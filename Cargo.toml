@@ -9,6 +9,7 @@ git = ["git2"]
 
 [dependencies]
 anyhow = "1.0.75"
+clap = { version = "4.4.4", features = ["derive"] }
 # We only need local Git repo support. Default features enable remote clone & fetch.
 git2 = { version = "0.18", optional = true, default-features = false }
 ignore = "0.4.20"

@@ -1,20 +1,47 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 mod core;
 mod git;
 mod parser;
 
+use clap::Parser as CliParser;
 use parser::Parser;
 
+#[derive(clap::Parser, Clone, Debug)]
+enum Mode {
+    Repo { path: PathBuf },
+    Directory { path: PathBuf },
+}
+
+#[derive(clap::Parser, Debug)]
+struct Cli {
+    #[clap(subcommand)]
+    mode: Mode,
+
+    #[clap(short, long)]
+    verbose: bool,
+}
+
 fn main() {
-    let git_repo_path = Path::new("../test_repo/abcde");
-    let file_set = dbg!(Parser::from_git_repo(git_repo_path).unwrap());
+    let cli = Cli::parse();
 
-    // For each file, check each block's position against the staged file hunks.
-    // If a block has changed, add it to a set.
-    // For each block in the set, check the on_change target and ensure that it has also changed.
-    // dbg!(&file_set);
-    // dbg!(&file_set.blocks());
+    let parser = match cli.mode {
+        Mode::Directory { path } => Parser::from_directory(path),
+        Mode::Repo { path } => Parser::from_git_repo(path),
+    };
+    if let Err(e) = parser {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
 
-    // dbg!(&file_set);
+    let parser = parser.unwrap();
+    let mut files = parser.files();
+    files.sort();
+
+    if files.len() != 0 {
+        println!("Checked:\n");
+        for f in files {
+            println!("  * {}", f.display());
+        }
+    }
 }

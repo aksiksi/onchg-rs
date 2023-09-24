@@ -142,7 +142,14 @@ impl File {
         let mut state = ParseState::Searching;
         let mut block_name: Option<String> = None;
         for (line_num, line) in reader.lines().enumerate() {
-            let line = line?;
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    // TODO(aksiksi): We can probably do something cleaner here.
+                    eprintln!("Error reading lines from {}: {}", path.display(), e);
+                    return Ok((File { blocks }, files_to_parse));
+                }
+            };
             let line_num = line_num + 1;
             match state {
                 ParseState::Searching => {
@@ -409,5 +416,9 @@ impl FileSet {
             None => None,
             Some(file) => file.blocks.get(block_name),
         }
+    }
+
+    pub fn files(&self) -> Vec<&Path> {
+        self.files.keys().map(|p| p.as_path()).collect()
     }
 }

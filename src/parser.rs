@@ -75,4 +75,8 @@ impl Parser {
         let file_set = FileSet::from_directory(path)?;
         Ok(Self { file_set })
     }
+
+    pub fn files(&self) -> Vec<&Path> {
+        self.file_set.files()
+    }
 }

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use git2::{Delta, DiffHunk, Repository};
+use git2::{Delta, DiffHunk, Repository, StatusOptions};
 
 pub fn get_staged_file_paths<P: AsRef<Path>>(
     path: P,
@@ -14,13 +14,24 @@ pub fn get_staged_file_paths<P: AsRef<Path>>(
         Repository::discover(path.as_ref())?
     };
     let repo_path = repo.path().parent().unwrap();
-    let index = repo.index()?;
+    let mut opts = StatusOptions::new();
     let mut paths = Vec::new();
-    for entry in index.iter() {
-        let s = String::from_utf8(entry.path)?;
-        let p = repo_path.join(Path::new(&s));
-        paths.push(p);
+    for entry in repo
+        .statuses(Some(opts.show(git2::StatusShow::Index)))?
+        .iter()
+    {
+        match entry.status() {
+            // We only care about modified and new files.
+            git2::Status::INDEX_NEW | git2::Status::INDEX_MODIFIED => (),
+            _ => continue,
+        }
+        let file_path = match entry.path() {
+            Some(p) => p,
+            None => continue,
+        };
+        paths.push(repo_path.join(Path::new(file_path)));
     }
+
     Ok((paths, repo_path.to_owned(), repo))
 }
 
