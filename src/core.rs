@@ -42,8 +42,8 @@ pub enum BlockTarget {
 #[derive(Clone, Debug)]
 pub struct Block {
     pub name: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub start_line: u32,
+    pub end_line: u32,
     pub on_change: BlockTarget,
 }
 
@@ -183,7 +183,7 @@ impl File {
                         Entry::Vacant(e) => {
                             let block = Block {
                                 name: block_name.clone().unwrap(),
-                                start_line: line_num,
+                                start_line: line_num as u32,
                                 end_line: 0,
                                 on_change: BlockTarget::Unset,
                             };
@@ -233,7 +233,7 @@ impl File {
                     blocks.insert(
                         block.name.clone(),
                         Block {
-                            end_line: line_num,
+                            end_line: line_num as u32,
                             on_change: block_target,
                             ..block
                         },
@@ -264,7 +264,7 @@ pub struct FileSet {
 }
 
 impl FileSet {
-    pub fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         let blocks = self.blocks();
 
         for (path, file) in &self.files {
@@ -299,15 +299,14 @@ impl FileSet {
         Ok(())
     }
 
-    pub fn parse_staged_files<P: AsRef<Path>>(path: P, is_repo_path: bool) -> Result<Self> {
-        let (staged_files, repo_path, repo) =
-            super::git::get_staged_file_paths(path, is_repo_path).unwrap();
-
+    /// Parses a set of files, as well as (recursively) any files referenced by OnChange blocks in the
+    /// given set of files.
+    pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(paths: &[P], root_path: Q) -> Result<Self> {
         let mut files = BTreeMap::new();
-        let mut file_stack: Vec<PathBuf> = staged_files.clone();
+        let mut file_stack: Vec<PathBuf> = paths.iter().map(|p| p.as_ref().to_owned()).collect();
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, &mut files, Some(repo_path.as_path()))?;
+            let (file, files_to_parse) = File::parse(&path, &mut files, Some(root_path.as_ref()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
@@ -321,8 +320,6 @@ impl FileSet {
             num_blocks += file.blocks.len();
         }
 
-        crate::git::get_staged_hunks(&repo).unwrap();
-
         let file_set = FileSet { files, num_blocks };
         file_set.validate()?;
         Ok(file_set)
@@ -331,10 +328,18 @@ impl FileSet {
     /// Recursively walks through all files in the given path and parses them.
     ///
     /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
-    pub fn parse<P: AsRef<Path>>(path: P) -> Result<Self> {
+    #[allow(unused)]
+    pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
         let root_path = path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
         let mut file_stack: Vec<PathBuf> = Vec::new();
+
+        if !root_path.is_dir() {
+            return Err(anyhow::anyhow!(
+                "{} is not a directory",
+                root_path.display()
+            ));
+        }
 
         let dir_walker = WalkBuilder::new(&root_path).build();
         for entry in dir_walker {
@@ -383,5 +388,26 @@ impl FileSet {
             }
         }
         blocks
+    }
+
+    /// Returns a map of all blocks in the file set.
+    pub fn blocks_in_file<P: AsRef<Path>>(&self, path: P) -> Option<HashMap<&str, &Block>> {
+        match self.files.get(path.as_ref()) {
+            None => None,
+            Some(file) => {
+                let mut blocks = HashMap::with_capacity(file.blocks.len());
+                for (name, block) in file.blocks.iter() {
+                    blocks.insert(name.as_str(), block);
+                }
+                Some(blocks)
+            }
+        }
+    }
+
+    pub fn get_block<P: AsRef<Path>>(&self, path: P, block_name: &str) -> Option<&Block> {
+        match self.files.get(path.as_ref()) {
+            None => None,
+            Some(file) => file.blocks.get(block_name),
+        }
     }
 }
