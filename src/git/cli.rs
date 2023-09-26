@@ -7,20 +7,13 @@ use patch::Patch;
 
 use super::{Hunk, Line, Repo};
 
-pub struct Cli;
-
-impl Cli {
-    #[allow(unused)]
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
 // Returns the names of non-deleted staged files.
 const STAGED_FILES_CMD: &[&str] = &["diff", "--cached", "--name-only", "--diff-filter=d"];
 // Returns all staged hunks for non-deleted files.
 // --no-prefix omits the path prefix for the old and new files (a/ and b/, respectively).
 const STAGED_HUNKS_CMD: &[&str] = &["diff", "--cached", "--no-prefix", "--diff-filter=d"];
+
+pub struct Cli;
 
 impl Repo for Cli {
     fn get_staged_files(&self, repo_path: Option<&Path>) -> Result<(Vec<PathBuf>, PathBuf)> {

@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::core::{BlockTarget, FileSet};
-use crate::git::Repo;
+use crate::core::{FileSet, ThenChange};
+use crate::git::{cli::Cli, Repo};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -22,10 +22,9 @@ impl Parser {
         };
         #[cfg(not(feature = "git"))]
         let ((staged_files, repo_path), staged_hunks) = {
-            let c = crate::git::cli::Cli::new();
             (
-                c.get_staged_files(Some(path))?,
-                c.get_staged_hunks(Some(path))?,
+                Cli.get_staged_files(Some(path))?,
+                Cli.get_staged_hunks(Some(path))?,
             )
         };
 
@@ -33,7 +32,7 @@ impl Parser {
         let mut blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
         for (path, hunks) in &staged_hunks {
-            let blocks_in_file = if let Some(blocks) = file_set.blocks_in_file(path) {
+            let blocks_in_file = if let Some(blocks) = file_set.on_change_blocks_in_file(path) {
                 blocks
             } else {
                 continue;
@@ -52,18 +51,18 @@ impl Parser {
         // For each block in the set, check the OnChange target and ensure that it has also changed.
         for (path, block_name) in &blocks_changed {
             let path = *path;
-            let block = file_set.get_block(path, block_name).unwrap();
+            let block = file_set.get_on_change_block(path, block_name).unwrap();
 
-            let (on_change_file, on_change_block) = match &block.on_change {
-                BlockTarget::None => continue,
-                BlockTarget::Block {
+            let (on_change_file, on_change_block) = match &block.then_change {
+                ThenChange::None => continue,
+                ThenChange::Block {
                     block: ref target_block,
                     file: target_file,
                 } => match target_file {
                     Some(target_file) => (target_file.as_path(), target_block.as_str()),
                     None => (path, target_block.as_str()),
                 },
-                BlockTarget::Unset => panic!("BlockTarget::Unset should have been resolved by now"),
+                ThenChange::Unset => panic!("BlockTarget::Unset should have been resolved by now"),
             };
 
             if !blocks_changed.contains(&(on_change_file, on_change_block)) {

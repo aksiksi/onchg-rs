@@ -30,7 +30,7 @@ thread_local! {
 }
 
 #[derive(Clone, Debug)]
-pub enum BlockTarget {
+pub enum ThenChange {
     Unset,
     None,
     Block {
@@ -40,29 +40,29 @@ pub enum BlockTarget {
 }
 
 #[derive(Clone, Debug)]
-pub struct Block {
+pub struct OnChangeBlock {
     pub name: String,
     pub start_line: u32,
     pub end_line: u32,
-    pub on_change: BlockTarget,
+    pub then_change: ThenChange,
 }
 
 #[derive(Debug)]
 pub struct File {
-    blocks: HashMap<String, Block>,
+    blocks: HashMap<String, OnChangeBlock>,
 }
 
 impl File {
-    fn build_block_target(
+    fn build_then_change(
         files_to_parse: &mut HashSet<PathBuf>,
         line_num: usize,
         path: &Path,
         root_path: Option<&Path>,
         then_change_target: &str,
-    ) -> Result<BlockTarget> {
+    ) -> Result<ThenChange> {
         let then_change_target = then_change_target.trim();
         if then_change_target.is_empty() {
-            return Ok(BlockTarget::None);
+            return Ok(ThenChange::None);
         }
 
         let split_target: Vec<&str> = then_change_target.split(":").collect();
@@ -76,7 +76,7 @@ impl File {
         let block_name = split_target[1];
         if split_target[0] == "" {
             // Block target in same file.
-            return Ok(BlockTarget::Block {
+            return Ok(ThenChange::Block {
                 block: block_name.to_string(),
                 file: None,
             });
@@ -111,7 +111,7 @@ impl File {
         file_path = file_path.canonicalize().unwrap();
         files_to_parse.insert(file_path.clone());
 
-        return Ok(BlockTarget::Block {
+        return Ok(ThenChange::Block {
             block: block_name.to_string(),
             file: Some(file_path),
         });
@@ -124,7 +124,7 @@ impl File {
         let path = path.as_ref().canonicalize()?;
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
-        let mut blocks: HashMap<String, Block> = HashMap::new();
+        let mut blocks: HashMap<String, OnChangeBlock> = HashMap::new();
         // Set of files that need to be parsed based on OnChange targets seen in this file.
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
 
@@ -184,11 +184,11 @@ impl File {
                             ));
                         }
                         Entry::Vacant(e) => {
-                            let block = Block {
+                            let block = OnChangeBlock {
                                 name: block_name.clone().unwrap(),
                                 start_line: line_num as u32,
                                 end_line: 0,
-                                on_change: BlockTarget::Unset,
+                                then_change: ThenChange::Unset,
                             };
                             e.insert(block);
                         }
@@ -223,7 +223,7 @@ impl File {
                         ));
                     }
 
-                    let block_target = Self::build_block_target(
+                    let block_target = Self::build_then_change(
                         &mut files_to_parse,
                         line_num,
                         &path,
@@ -234,9 +234,9 @@ impl File {
                     let block = blocks.get(block_name).unwrap().clone();
                     blocks.insert(
                         block.name.clone(),
-                        Block {
+                        OnChangeBlock {
                             end_line: line_num as u32,
-                            on_change: block_target,
+                            then_change: block_target,
                             ..block
                         },
                     );
@@ -267,13 +267,13 @@ pub struct FileSet {
 
 impl FileSet {
     fn validate(&self) -> Result<()> {
-        let blocks = self.blocks();
+        let blocks = self.on_change_blocks();
 
         for (path, file) in &self.files {
             for (name, block) in &file.blocks {
-                match &block.on_change {
-                    BlockTarget::None => {}
-                    BlockTarget::Block { block, file } => {
+                match &block.then_change {
+                    ThenChange::None => {}
+                    ThenChange::Block { block, file } => {
                         if let Some(file) = file {
                             let block_key = (file.as_ref(), block.as_str());
                             if !blocks.contains_key(&block_key) {
@@ -287,7 +287,7 @@ impl FileSet {
                             }
                         }
                     }
-                    BlockTarget::Unset => {
+                    ThenChange::Unset => {
                         return Err(anyhow::anyhow!(
                             r#"block "{}" in file "{}" has an invalid OnChange target"#,
                             block.name,
@@ -396,7 +396,7 @@ impl FileSet {
     }
 
     /// Returns a map of all blocks in the file set.
-    pub fn blocks(&self) -> HashMap<(&Path, &str), &Block> {
+    pub fn on_change_blocks(&self) -> HashMap<(&Path, &str), &OnChangeBlock> {
         let mut blocks = HashMap::with_capacity(self.num_blocks);
         for (path, file) in self.files.iter() {
             for (name, block) in file.blocks.iter() {
@@ -407,7 +407,10 @@ impl FileSet {
     }
 
     /// Returns a map of all blocks in the file set.
-    pub fn blocks_in_file<P: AsRef<Path>>(&self, path: P) -> Option<HashMap<&str, &Block>> {
+    pub fn on_change_blocks_in_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Option<HashMap<&str, &OnChangeBlock>> {
         match self.files.get(path.as_ref()) {
             None => None,
             Some(file) => {
@@ -420,7 +423,11 @@ impl FileSet {
         }
     }
 
-    pub fn get_block<P: AsRef<Path>>(&self, path: P, block_name: &str) -> Option<&Block> {
+    pub fn get_on_change_block<P: AsRef<Path>>(
+        &self,
+        path: P,
+        block_name: &str,
+    ) -> Option<&OnChangeBlock> {
         match self.files.get(path.as_ref()) {
             None => None,
             Some(file) => file.blocks.get(block_name),
