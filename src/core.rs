@@ -51,8 +51,8 @@ pub struct OnChangeBlock {
 
 impl OnChangeBlock {
     pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
-        let mut old_block_start = None;
-        let mut old_block_end = None;
+        let mut old_start_line = None;
+        let mut old_end_line = None;
         let mut lines_removed = Vec::new();
         for line in &hunk.lines {
             match line {
@@ -76,9 +76,9 @@ impl OnChangeBlock {
                     // an added line.
                     let (old, new) = (*old, *new);
                     if self.start_line == new {
-                        old_block_start = Some(old);
+                        old_start_line = Some(old);
                     } else if self.end_line == new {
-                        old_block_end = Some(old);
+                        old_end_line = Some(old);
                     }
                 }
             }
@@ -87,15 +87,22 @@ impl OnChangeBlock {
         // Check each of the removed lines against the old block start or end lines.
         // This is how we detect if a line was removed inside a block.
         for l in lines_removed {
-            if let Some(old_start) = old_block_start {
-                if l >= old_start {
+            match (old_start_line, old_end_line) {
+                // Removed line falls between the (old) start and end lines of the block.
+                (Some(old_start_line), Some(old_end_line))
+                    if l >= old_start_line && l <= old_end_line =>
+                {
                     return true;
                 }
-            }
-            if let Some(old_end) = old_block_end {
-                if l <= old_end {
+                // Removed line is after the (old) start line of the block.
+                (Some(old_start_line), None) if l >= old_start_line => {
                     return true;
                 }
+                // Removed line is before the (old) end line of the block.
+                (None, Some(old_end_line)) if l <= old_end_line => {
+                    return true;
+                }
+                _ => (),
             }
         }
 
