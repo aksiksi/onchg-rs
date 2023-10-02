@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::core::{FileSet, OnChangeBlock, ThenChange};
+use crate::core::{FileSet, OnChangeBlock};
 use crate::git::{Hunk, Repo};
 
 #[derive(Debug)]
@@ -72,31 +72,22 @@ impl Parser {
             }
         }
 
-        // For each block in the set, check the OnChange target and ensure that it has also changed.
+        // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
         for (path, block_name) in &blocks_changed {
             let path = *path;
             let block = file_set.get_on_change_block(path, block_name).unwrap();
 
-            let (on_change_file, on_change_block) = match &block.then_change {
-                ThenChange::None => continue,
-                ThenChange::Block {
-                    block: ref target_block,
-                    file: target_file,
-                } => match target_file {
-                    Some(target_file) => (target_file.as_path(), target_block.as_str()),
-                    None => (path, target_block.as_str()),
-                },
-                ThenChange::Unset => panic!("BlockTarget::Unset should have been resolved by now"),
-            };
-
-            if !blocks_changed.contains(&(on_change_file, on_change_block)) {
-                return Err(anyhow::anyhow!(
-                    r#"Block "{}" in staged file "{}" has changed, but its OnChange target "{}" in "{}" has not"#,
-                    block_name,
-                    path.display(),
-                    on_change_block,
-                    on_change_file.display()
-                ));
+            let blocks_to_check = block.then_change.get_targets_as_keys(path);
+            for (on_change_file, on_change_block) in blocks_to_check {
+                if !blocks_changed.contains(&(on_change_file, on_change_block)) {
+                    return Err(anyhow::anyhow!(
+                        r#"Block "{}" in staged file "{}" has changed, but its OnChange target "{}" in "{}" has not"#,
+                        block_name,
+                        path.display(),
+                        on_change_block,
+                        on_change_file.display()
+                    ));
+                }
             }
         }
 
@@ -132,19 +123,51 @@ mod test {
             ),
             ("f2.txt", "OnChange()\nThenChange(f1.txt:default)\n"),
         ];
-        let d = GitRepo::from_files(files).unwrap();
+        let d = GitRepo::from_files(files);
 
         // Delete one line from f1.txt and stage it.
-        d.write_file("f1.txt", "OnChange()\nadadd\nThenChange(f2.txt:default)\n")
-            .unwrap();
-        d.add_all_files().unwrap();
+        d.write_file("f1.txt", "OnChange()\nadadd\nThenChange(f2.txt:default)\n");
+        d.add_all_files();
         // This should fail because f1.txt has changed but f2.txt has not.
         assert!(Parser::from_git_repo(d.path()).is_err());
 
         // Now stage the other file and ensure the parser succeeds.
-        d.write_file("f2.txt", "OnChange()\nadadd\nThenChange(f1.txt:default)\n")
-            .unwrap();
-        d.add_all_files().unwrap();
-        assert!(Parser::from_git_repo(d.path()).is_ok());
+        d.write_file("f2.txt", "OnChange()\nadadd\nThenChange(f1.txt:default)\n");
+        d.add_all_files();
+        Parser::from_git_repo(d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_git_repo_multiple_targets() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:potato)\n",
+            ),
+            ("f2.txt", "OnChange(potato)\nThenChange(f1.txt:default)\n"),
+            (
+                "f3.txt",
+                "OnChange()\nThenChange(f1.txt:default, f2.txt:potato)\n",
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Add a line to f3 and stage it.
+        d.write_file(
+            "f3.txt",
+            "OnChange()\nhello,there!\nThenChange(f1.txt:default, f2.txt:potato)\n",
+        );
+        d.add_all_files();
+        // This should fail because f3.txt has changed but f1 and f2 have not.
+        assert!(Parser::from_git_repo(d.path()).is_err());
+
+        // Now stage the other files and ensure the parser succeeds.
+        d.write_file("f1.txt", "OnChange()\nadadd\nThenChange(f2.txt:potato)\n");
+        d.write_file(
+            "f2.txt",
+            "OnChange(potato)\nadadd\nThenChange(f1.txt:default)\n",
+        );
+        d.add_all_files();
+        Parser::from_git_repo(d.path()).unwrap();
     }
 }
