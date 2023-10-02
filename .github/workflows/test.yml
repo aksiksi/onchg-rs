@@ -1,0 +1,23 @@
+name: test
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+    branches:
+      - main
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run tests
+        run: make ci
