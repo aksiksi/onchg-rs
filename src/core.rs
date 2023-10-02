@@ -21,6 +21,8 @@ use anyhow::Result;
 use ignore::WalkBuilder;
 use regex::Regex;
 
+use crate::git::{Hunk, Line};
+
 const DEFAULT_ON_CHANGE_BLOCK_NAME: &str = ":default";
 
 thread_local! {
@@ -45,6 +47,60 @@ pub struct OnChangeBlock {
     pub start_line: u32,
     pub end_line: u32,
     pub then_change: ThenChange,
+}
+
+impl OnChangeBlock {
+    pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
+        let mut old_block_start = None;
+        let mut old_block_end = None;
+        let mut lines_removed = Vec::new();
+        for line in &hunk.lines {
+            match line {
+                Line::Add(l) => {
+                    // A line was added inside the block.
+                    if *l >= self.start_line && *l <= self.end_line {
+                        return true;
+                    }
+                }
+                Line::Remove(l) => {
+                    // Keep track of removed blocks to check against the old
+                    // block lines.
+                    lines_removed.push(*l);
+                }
+                Line::Context(old, new) => {
+                    // Check if this context line is a start or end line for the block.
+                    //
+                    // Note that we expect _at least_ one of the context lines to be either
+                    // a start or end line. If a block start/end is removed, the block is
+                    // invalid. If it was removed and re-added, it will be picked up as
+                    // an added line.
+                    let (old, new) = (*old, *new);
+                    if self.start_line == new {
+                        old_block_start = Some(old);
+                    } else if self.end_line == new {
+                        old_block_end = Some(old);
+                    }
+                }
+            }
+        }
+
+        // Check each of the removed lines against the old block start or end lines.
+        // This is how we detect if a line was removed inside a block.
+        for l in lines_removed {
+            if let Some(old_start) = old_block_start {
+                if l >= old_start {
+                    return true;
+                }
+            }
+            if let Some(old_end) = old_block_end {
+                if l <= old_end {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -407,16 +463,13 @@ impl FileSet {
     }
 
     /// Returns a map of all blocks in the file set.
-    pub fn on_change_blocks_in_file<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> Option<HashMap<&str, &OnChangeBlock>> {
+    pub fn on_change_blocks_in_file<P: AsRef<Path>>(&self, path: P) -> Option<Vec<&OnChangeBlock>> {
+        let mut blocks = Vec::new();
         match self.files.get(path.as_ref()) {
             None => None,
             Some(file) => {
-                let mut blocks = HashMap::with_capacity(file.blocks.len());
-                for (name, block) in file.blocks.iter() {
-                    blocks.insert(name.as_str(), block);
+                for (_, block) in file.blocks.iter() {
+                    blocks.push(block);
                 }
                 Some(blocks)
             }

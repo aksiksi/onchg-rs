@@ -75,16 +75,7 @@ impl Repo for Cli {
             let path = repo_path
                 .join(Path::new(diff_file.new.path.as_ref()))
                 .canonicalize()?;
-
-            let mut hunks = Vec::new();
-            for h in diff_file.hunks {
-                let mut hunk = Hunk::from(&h);
-                for line in h.lines {
-                    hunk.handle_line(line.into());
-                }
-                hunks.push(hunk);
-            }
-
+            let hunks = diff_file.hunks.iter().map(Hunk::from).collect();
             hunk_map.insert(path, hunks);
         }
 
@@ -94,25 +85,38 @@ impl Repo for Cli {
 
 impl From<&patch::Hunk<'_>> for Hunk {
     fn from(h: &patch::Hunk) -> Self {
-        Self {
-            start_line: h.new_range.start as u32,
-            end_line: (h.new_range.start + h.new_range.count - 1) as u32,
-            old_start_line: h.old_range.start as u32,
-            old_end_line: (h.old_range.start + h.old_range.count - 1) as u32,
-            changed_lines: Vec::new(),
-            num_added: 0,
-            num_removed: 0,
-            num_context: 0,
+        let mut lines = Vec::new();
+        let mut num_added = 0;
+        let mut num_removed = 0;
+        let mut num_context = 0;
+        let (start_line, end_line) = (
+            h.new_range.start as u32,
+            (h.new_range.start + h.new_range.count - 1) as u32,
+        );
+        let old_start_line = h.old_range.start as u32;
+        for line in &h.lines {
+            let new_line = start_line + num_context + num_added;
+            let old_line = old_start_line + num_context + num_removed;
+            let line = match line {
+                patch::Line::Add(_) => {
+                    num_added += 1;
+                    Line::Add(new_line)
+                }
+                patch::Line::Remove(_) => {
+                    num_removed += 1;
+                    Line::Remove(old_line)
+                }
+                patch::Line::Context(_) => {
+                    num_context += 1;
+                    Line::Context(old_line, new_line)
+                }
+            };
+            lines.push(line);
         }
-    }
-}
-
-impl From<patch::Line<'_>> for Line {
-    fn from(value: patch::Line<'_>) -> Self {
-        match value {
-            patch::Line::Add(_) => Line::Add,
-            patch::Line::Remove(_) => Line::Remove,
-            patch::Line::Context(_) => Line::Context,
+        Self {
+            lines,
+            start_line,
+            end_line,
         }
     }
 }

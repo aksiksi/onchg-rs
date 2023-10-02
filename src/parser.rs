@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::core::{FileSet, ThenChange};
-use crate::git::{cli::Cli, Repo};
+use crate::core::{FileSet, OnChangeBlock, ThenChange};
+use crate::git::{Hunk, Repo};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -12,6 +12,35 @@ pub struct Parser {
 }
 
 impl Parser {
+    fn find_changed_blocks<'a>(
+        hunks: &[Hunk],
+        blocks: &[&'a OnChangeBlock],
+    ) -> Vec<&'a OnChangeBlock> {
+        let mut changed_blocks = HashSet::new();
+
+        // TODO(aksiksi): We can make this faster using a reverse index.
+        let mut maybe_overlapping = Vec::new();
+        for hunk in hunks {
+            for (i, block) in blocks.iter().enumerate() {
+                if hunk.is_block_overlap(block.start_line, block.end_line) {
+                    maybe_overlapping.push((hunk, i));
+                }
+            }
+        }
+
+        for (hunk, block_idx) in maybe_overlapping {
+            if changed_blocks.contains(&block_idx) {
+                continue;
+            }
+            let block = &blocks[block_idx];
+            if block.is_changed_by_hunk(hunk) {
+                changed_blocks.insert(block_idx);
+            }
+        }
+
+        changed_blocks.into_iter().map(|idx| blocks[idx]).collect()
+    }
+
     pub fn from_git_repo<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
 
@@ -23,8 +52,8 @@ impl Parser {
         #[cfg(not(feature = "git"))]
         let ((staged_files, repo_path), staged_hunks) = {
             (
-                Cli.get_staged_files(Some(path))?,
-                Cli.get_staged_hunks(Some(path))?,
+                crate::git::cli::Cli.get_staged_files(Some(path))?,
+                crate::git::cli::Cli.get_staged_hunks(Some(path))?,
             )
         };
 
@@ -37,14 +66,9 @@ impl Parser {
             } else {
                 continue;
             };
-
-            // Check each hunk against each block.
-            for hunk in hunks {
-                for (_, block) in &blocks_in_file {
-                    if hunk.is_line_changed_within(block.start_line, block.end_line) {
-                        blocks_changed.insert((path.as_path(), block.name.as_str()));
-                    }
-                }
+            let changed_blocks = Self::find_changed_blocks(hunks, &blocks_in_file);
+            for block in changed_blocks {
+                blocks_changed.insert((&path, &block.name));
             }
         }
 

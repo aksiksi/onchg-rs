@@ -9,14 +9,9 @@ use super::{Hunk, Line, Repo};
 impl From<DiffHunk<'_>> for Hunk {
     fn from(h: DiffHunk<'_>) -> Self {
         Self {
+            lines: Vec::new(),
             start_line: h.new_start(),
             end_line: h.new_start() + h.new_lines() - 1,
-            old_start_line: h.old_start(),
-            old_end_line: h.old_start() + h.old_lines() - 1,
-            changed_lines: Vec::new(),
-            num_added: 0,
-            num_removed: 0,
-            num_context: 0,
         }
     }
 }
@@ -24,9 +19,9 @@ impl From<DiffHunk<'_>> for Hunk {
 impl From<DiffLine<'_>> for Line {
     fn from(l: DiffLine<'_>) -> Self {
         match l.origin() {
-            '+' => Line::Add,
-            '-' => Line::Remove,
-            ' ' => Line::Context,
+            '+' => Line::Add(l.new_lineno().unwrap()),
+            '-' => Line::Remove(l.old_lineno().unwrap()),
+            ' ' => Line::Context(l.old_lineno().unwrap(), l.new_lineno().unwrap()),
             _ => unreachable!(),
         }
     }
@@ -115,7 +110,7 @@ impl Repo for Repository {
                     .get_mut(&(start_line, end_line))
                     .unwrap();
 
-                hunk.handle_line(line.into());
+                hunk.lines.push(line.into());
 
                 true
             }),
