@@ -40,20 +40,17 @@ pub struct ThenChangeTarget {
 #[derive(Clone, Debug)]
 pub enum ThenChange {
     Unset,
-    None,
-    Block(ThenChangeTarget),
-    Blocks(Vec<ThenChangeTarget>),
+    NoTarget,
+    /// One or more blocks.
+    BlockTarget(Vec<ThenChangeTarget>),
 }
 
 impl ThenChange {
     pub fn get_targets_as_keys<'a>(&'a self, default_path: &'a Path) -> Vec<(&Path, &str)> {
         let mut targets = Vec::new();
         match &self {
-            ThenChange::None | ThenChange::Unset => (),
-            ThenChange::Block(target) => {
-                targets.push(target);
-            }
-            ThenChange::Blocks(targets_) => {
+            ThenChange::NoTarget | ThenChange::Unset => (),
+            ThenChange::BlockTarget(targets_) => {
                 targets.extend(targets_);
             }
         }
@@ -209,7 +206,7 @@ impl File {
     ) -> Result<ThenChange> {
         let then_change_target = then_change_target.trim();
         if then_change_target.is_empty() {
-            return Ok(ThenChange::None);
+            return Ok(ThenChange::NoTarget);
         }
 
         let mut then_change_targets = Vec::new();
@@ -232,11 +229,7 @@ impl File {
             then_change_targets.push(t);
         }
 
-        match then_change_targets.len() {
-            0 => unreachable!(),
-            1 => Ok(ThenChange::Block(then_change_targets[0].clone())),
-            _ => Ok(ThenChange::Blocks(then_change_targets)),
-        }
+        Ok(ThenChange::BlockTarget(then_change_targets))
     }
 
     fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
@@ -408,11 +401,8 @@ impl FileSet {
         for (path, file) in &self.files {
             for (name, block) in &file.blocks {
                 match &block.then_change {
-                    ThenChange::None => {}
-                    ThenChange::Block(target) => {
-                        Self::validate_block_target(&self, path, name, target, &blocks)?;
-                    }
-                    ThenChange::Blocks(target_blocks) => {
+                    ThenChange::NoTarget => {}
+                    ThenChange::BlockTarget(target_blocks) => {
                         for target in target_blocks {
                             Self::validate_block_target(&self, path, name, target, &blocks)?;
                         }
