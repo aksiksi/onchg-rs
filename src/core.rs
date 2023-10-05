@@ -39,6 +39,8 @@ pub struct ThenChangeTarget {
 pub enum ThenChange {
     Unset,
     NoTarget,
+    /// Entire file.
+    FileTarget(PathBuf),
     /// One or more blocks.
     BlockTarget(Vec<ThenChangeTarget>),
 }
@@ -128,13 +130,16 @@ impl OnChangeBlock {
     pub fn get_then_change_targets_as_keys<'a>(
         &'a self,
         default_path: &'a Path,
-    ) -> Option<impl Iterator<Item = (&Path, &str)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&Path, Option<&str>)> + 'a> {
         match &self.then_change {
-            ThenChange::NoTarget | ThenChange::Unset => None,
-            ThenChange::BlockTarget(targets) => Some(targets.iter().map(move |t| match &t.file {
-                Some(path) => (path.as_path(), t.block.as_str()),
-                None => (default_path, t.block.as_str()),
-            })),
+            ThenChange::NoTarget | ThenChange::Unset => Box::new(std::iter::empty()),
+            ThenChange::FileTarget(path) => Box::new(std::iter::once((path.as_path(), None))),
+            ThenChange::BlockTarget(targets) => {
+                Box::new(targets.iter().map(move |t| match &t.file {
+                    Some(path) => (path.as_path(), Some(t.block.as_str())),
+                    None => (default_path, Some(t.block.as_str())),
+                }))
+            }
         }
     }
 }
@@ -145,31 +150,14 @@ pub struct File {
 }
 
 impl File {
-    fn parse_single_then_change_target(
+    fn parse_then_target_file_path(
         line_num: usize,
         path: &Path,
         root_path: Option<&Path>,
         then_change_target: &str,
-    ) -> Result<ThenChangeTarget> {
-        let split_target: Vec<&str> = then_change_target.split(":").collect();
-        if split_target.len() < 2 {
-            return Err(anyhow::anyhow!(
-                "invalid ThenChange target on line {}: {}",
-                line_num,
-                then_change_target
-            ));
-        }
-        let block_name = split_target[1];
-        if split_target[0] == "" {
-            // Block target in same file.
-            return Ok(ThenChangeTarget {
-                block: block_name.to_string(),
-                file: None,
-            });
-        }
+    ) -> Result<PathBuf> {
+        let mut file_path = PathBuf::from(then_change_target);
 
-        // Block target in another file.
-        let mut file_path = PathBuf::from(split_target[0]);
         if !file_path.exists() {
             let root_with_path = if let Some(root_path) = root_path {
                 if root_path.exists() {
@@ -195,7 +183,35 @@ impl File {
             }
         }
 
-        file_path = file_path.canonicalize().unwrap();
+        Ok(file_path.canonicalize().unwrap())
+    }
+
+    fn parse_single_then_change_target(
+        line_num: usize,
+        path: &Path,
+        root_path: Option<&Path>,
+        then_change_target: &str,
+    ) -> Result<ThenChangeTarget> {
+        let split_target: Vec<&str> = then_change_target.split(":").collect();
+        if split_target.len() < 2 {
+            return Err(anyhow::anyhow!(
+                "invalid ThenChange target on line {}: {}",
+                line_num,
+                then_change_target
+            ));
+        }
+        let block_name = split_target[1];
+        if split_target[0] == "" {
+            // Block target in same file.
+            return Ok(ThenChangeTarget {
+                block: block_name.to_string(),
+                file: None,
+            });
+        }
+
+        // Block target in another file.
+        let file_path =
+            Self::parse_then_target_file_path(line_num, path, root_path, split_target[0])?;
 
         Ok(ThenChangeTarget {
             block: block_name.to_string(),
@@ -214,10 +230,15 @@ impl File {
         if then_change_target.is_empty() {
             return Ok(ThenChange::NoTarget);
         }
+        if !then_change_target.contains(":") {
+            // Try to parse as just a file target.
+            let file_path =
+                Self::parse_then_target_file_path(line_num, path, root_path, then_change_target)?;
+            return Ok(ThenChange::FileTarget(file_path));
+        }
 
+        // Split on comma to build a list of targets.
         let mut then_change_targets = Vec::new();
-
-        // First, split on comma to see if we have a list of targets.
         let split_by_comma: Vec<&str> = then_change_target.split(",").collect();
         let split_by_comma = if split_by_comma.len() == 0 {
             // Single target.
@@ -436,6 +457,17 @@ impl FileSet {
                             Self::validate_block_target(&self, path, block, target, &blocks)?;
                         }
                     }
+                    ThenChange::FileTarget(target_path) => {
+                        if !self.files.contains_key(target_path) {
+                            return Err(anyhow::anyhow!(
+                                r#"block "{}" in file "{}" has invalid ThenChange target "{}" (line {})"#,
+                                block.name(),
+                                path.display(),
+                                target_path.display(),
+                                block.end_line,
+                            ));
+                        }
+                    }
                     ThenChange::Unset => {
                         return Err(anyhow::anyhow!(
                             r#"block "{}" in file "{}" has an unset OnChange target (line {})"#,
@@ -453,12 +485,14 @@ impl FileSet {
 
     /// Parses a set of files, as well as (recursively) any files referenced by OnChange blocks in the
     /// given set of files.
-    pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(paths: &[P], root_path: Q) -> Result<Self> {
+    pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(
+        paths: impl Iterator<Item = P>,
+        root_path: Q,
+    ) -> Result<Self> {
         let root_path = root_path.as_ref();
         let mut files = BTreeMap::new();
 
         let mut file_stack: Vec<PathBuf> = paths
-            .iter()
             .map(|p| {
                 let path = p.as_ref();
                 if path.exists() {
@@ -586,8 +620,23 @@ mod test {
             ("f2.txt", "OnChange(other)\nThenChange()"),
         ];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        FileSet::from_files(&file_names, d.path()).unwrap();
+        let file_names = files.iter().map(|f| f.0);
+        FileSet::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_from_files_file_target() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)",
+            ),
+            ("f2.txt", "OnChange(other)\nThenChange()"),
+            ("f3.txt", "OnChange(this)\nThenChange(f1.txt)"),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        FileSet::from_files(file_names, d.path()).unwrap();
     }
 
     #[test]
@@ -600,8 +649,8 @@ mod test {
             ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
         ];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        let res = FileSet::from_files(&file_names, d.path());
+        let file_names = files.iter().map(|f| f.0);
+        let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert_eq!(
@@ -620,8 +669,8 @@ mod test {
             ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
         ];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        let res = FileSet::from_files(&file_names, d.path());
+        let file_names = files.iter().map(|f| f.0);
+        let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains("has invalid OnChange target"));
@@ -636,8 +685,8 @@ mod test {
              OnChange(other)\nabdbbda\nadadd\nThenChange(:default)",
         )];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        let res = FileSet::from_files(&file_names, d.path());
+        let file_names = files.iter().map(|f| f.0);
+        let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 5"#));
@@ -651,8 +700,8 @@ mod test {
              OnChange(other)\nThenChange(:other)",
         )];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        let res = FileSet::from_files(&file_names, d.path());
+        let file_names = files.iter().map(|f| f.0);
+        let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert_eq!(
@@ -663,13 +712,10 @@ mod test {
 
     #[test]
     fn test_from_files_eof_in_block() {
-        let files = &[(
-            "f1.txt",
-            "OnChange(default)\nabdbbda\nadadd\n"
-        )];
+        let files = &[("f1.txt", "OnChange(default)\nabdbbda\nadadd\n")];
         let d = TestDir::from_files(files);
-        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
-        let res = FileSet::from_files(&file_names, d.path());
+        let file_names = files.iter().map(|f| f.0);
+        let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains("reached end of file"));

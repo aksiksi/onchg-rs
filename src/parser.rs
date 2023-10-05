@@ -58,7 +58,9 @@ impl Parser {
             )
         };
 
-        let file_set = FileSet::from_files(&staged_files, &repo_path)?;
+        let file_set = FileSet::from_files(staged_files.iter(), &repo_path)?;
+        let files_changed: HashSet<&Path> =
+            HashSet::from_iter(staged_files.iter().map(|p| p.as_path()));
         let mut blocks_changed: Vec<(&Path, &OnChangeBlock)> = Vec::new();
         let mut targetable_blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
@@ -82,19 +84,26 @@ impl Parser {
         // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
         for (path, block) in blocks_changed {
             let blocks_to_check = block.get_then_change_targets_as_keys(path);
-            if blocks_to_check.is_none() {
-                // No ThenChange targets for this block.
-                continue;
-            }
-            for (on_change_file, on_change_block) in blocks_to_check.unwrap() {
-                if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
-                    return Err(anyhow::anyhow!(
-                        r#"block "{}" in staged file "{}" has changed, but its OnChange target "{}" in "{}" has not"#,
-                        block.name(),
-                        path.display(),
-                        on_change_block,
-                        on_change_file.display()
-                    ));
+            for (on_change_file, on_change_block) in blocks_to_check {
+                if let Some(on_change_block) = on_change_block {
+                    if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
+                        return Err(anyhow::anyhow!(
+                            r#"block "{}" in staged file "{}" has changed, but its OnChange target block "{}:{}" has not"#,
+                            block.name(),
+                            path.display(),
+                            on_change_file.display(),
+                            on_change_block,
+                        ));
+                    }
+                } else {
+                    if !files_changed.contains(on_change_file) {
+                        return Err(anyhow::anyhow!(
+                            r#"block "{}" in staged file "{}" has changed, but its OnChange target file "{}" has not"#,
+                            block.name(),
+                            path.display(),
+                            on_change_file.display(),
+                        ));
+                    }
                 }
             }
         }
@@ -129,6 +138,7 @@ mod test {
                 "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
             ),
             ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)\n"),
+            ("f3.txt", "OnChange(this)\nThenChange(f1.txt)\n"),
         ];
         let d = GitRepo::from_files(files);
 
@@ -146,6 +156,11 @@ mod test {
             "f2.txt",
             "OnChange(default)\nadadd\nThenChange(f1.txt:default)\n",
         );
+        d.add_all_files();
+        Parser::from_git_repo(d.path()).unwrap();
+
+        // Now stage f3 and ensure the parser succeeds.
+        d.write_file("f3.txt", "OnChange(this)\nabcde\nThenChange(f1.txt)\n");
         d.add_all_files();
         Parser::from_git_repo(d.path()).unwrap();
     }
