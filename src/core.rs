@@ -29,13 +29,13 @@ thread_local! {
     static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*ThenChange\((.*)\).*$").unwrap());
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ThenChangeTarget {
     block: String,
     file: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ThenChange {
     Unset,
     NoTarget,
@@ -43,7 +43,7 @@ pub enum ThenChange {
     BlockTarget(Vec<ThenChangeTarget>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OnChangeBlock {
     // The name would be None for an untargetable block.
     name: Option<String>,
@@ -238,6 +238,20 @@ impl File {
         Ok(ThenChange::BlockTarget(then_change_targets))
     }
 
+    fn try_parse_on_change_line(line: &str) -> Option<String> {
+        match ON_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line)) {
+            None => None,
+            Some(captures) => Some(String::from(captures.get(1).unwrap().as_str().trim())),
+        }
+    }
+
+    fn try_parse_then_change_line(line: &str) -> Option<String> {
+        match THEN_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line)) {
+            None => None,
+            Some(captures) => Some(String::from(captures.get(1).unwrap().as_str().trim())),
+        }
+    }
+
     fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
         path: P,
         root_path: Option<Q>,
@@ -273,14 +287,13 @@ impl File {
             match state {
                 ParseState::Searching => {
                     // Try to parse the line as a OnChange.
-                    let captures = ON_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
-                    if captures.is_none() {
+                    let parsed = Self::try_parse_on_change_line(&line);
+                    if parsed.is_none() {
                         continue;
                     }
-                    let captures = captures.unwrap();
+                    let parsed = parsed.unwrap();
 
-                    let parsed = String::from(captures.get(1).unwrap().as_str().trim());
-                    let current_block_name = if parsed.is_empty() {
+                    let block_name = if parsed.is_empty() {
                         // An unnamed OnChange block is untargetable by other blocks.
                         None
                     } else {
@@ -288,7 +301,7 @@ impl File {
                     };
 
                     // Check for a duplicate block in the file.
-                    if let Some(block_name) = &current_block_name {
+                    if let Some(block_name) = &block_name {
                         if block_name_to_start_line.contains_key(block_name) {
                             return Err(anyhow::anyhow!(
                                 "duplicate block name \"{}\" found on lines {} and {} of {}",
@@ -302,8 +315,7 @@ impl File {
                     }
 
                     current_block = Some(OnChangeBlock {
-                        // Move the block name out.
-                        name: current_block_name,
+                        name: block_name,
                         start_line: line_num as u32,
                         end_line: 0,
                         then_change: ThenChange::Unset,
@@ -313,18 +325,21 @@ impl File {
                 }
                 ParseState::InBlock => {
                     // Try to parse the line as a ThenChange.
-                    let captures = THEN_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
-                    if captures.is_none() {
+                    let parsed = Self::try_parse_then_change_line(&line);
+                    if parsed.is_none() {
+                        // Try to parse as an OnChange to detect nested blocks.
+                        // TODO(aksiksi): See if we can support nested blocks. Should be doable?
+                        if Self::try_parse_on_change_line(&line).is_some() {
+                            return Err(anyhow::anyhow!(
+                                "found nested OnChange on line {} while already in block \"{}\"",
+                                line_num,
+                                current_block.unwrap().name(),
+                            ));
+                        }
                         continue;
                     }
-                    let captures = captures.unwrap();
+                    let parsed = parsed.unwrap();
 
-                    if current_block.is_none() {
-                        return Err(anyhow::anyhow!(
-                            "ThenChange found before OnChange on line {}",
-                            line_num
-                        ));
-                    }
                     let mut block = current_block
                         .take()
                         .expect("current_block should be set here");
@@ -334,7 +349,7 @@ impl File {
                         line_num,
                         &path,
                         root_path.as_ref().map(|p| p.as_path()),
-                        captures.get(1).unwrap().as_str(),
+                        &parsed,
                     )?;
 
                     block.end_line = line_num as u32;
@@ -354,7 +369,7 @@ impl File {
             _ => {
                 let current_block = current_block.expect("current_block should be set here");
                 Err(anyhow::anyhow!(
-                    "unexpected EOF in {} while looking for ThenChange for block \"{}\" on line {}",
+                    "reached end of file {} while looking for ThenChange for block \"{}\" which started on line {}",
                     path.display(),
                     current_block.name(),
                     current_block.start_line,
@@ -575,8 +590,6 @@ mod test {
         FileSet::from_files(&file_names, d.path()).unwrap();
     }
 
-    // TODO(aksiksi): Add more tests for invalid cases.
-
     #[test]
     fn test_from_files_invalid_block_target_file_path() {
         let files = &[
@@ -628,5 +641,37 @@ mod test {
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 5"#));
+    }
+
+    #[test]
+    fn test_from_files_nested_on_change() {
+        let files = &[(
+            "f1.txt",
+            "OnChange(default)\nabdbbda\nadadd\n
+             OnChange(other)\nThenChange(:other)",
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        let res = FileSet::from_files(&file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert_eq!(
+            err,
+            r#"found nested OnChange on line 5 while already in block "default""#
+        )
+    }
+
+    #[test]
+    fn test_from_files_eof_in_block() {
+        let files = &[(
+            "f1.txt",
+            "OnChange(default)\nabdbbda\nadadd\n"
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        let res = FileSet::from_files(&file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("reached end of file"));
     }
 }
