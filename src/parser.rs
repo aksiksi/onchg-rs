@@ -61,11 +61,12 @@ impl Parser {
         let mut blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
         for (path, hunks) in &staged_hunks {
-            let blocks_in_file = if let Some(blocks) = file_set.on_change_blocks_in_file(path) {
-                blocks
-            } else {
-                continue;
-            };
+            let blocks_in_file: Vec<&OnChangeBlock> =
+                if let Some(blocks) = file_set.on_change_blocks_in_file(path) {
+                    blocks.collect()
+                } else {
+                    continue;
+                };
             let changed_blocks = Self::find_changed_blocks(hunks, &blocks_in_file);
             for block in changed_blocks {
                 blocks_changed.insert((&path, &block.name));
@@ -76,9 +77,11 @@ impl Parser {
         for (path, block_name) in &blocks_changed {
             let path = *path;
             let block = file_set.get_on_change_block(path, block_name).unwrap();
-
             let blocks_to_check = block.then_change.get_targets_as_keys(path);
-            for (on_change_file, on_change_block) in blocks_to_check {
+            if blocks_to_check.is_none() {
+                break;
+            }
+            for (on_change_file, on_change_block) in blocks_to_check.unwrap() {
                 if !blocks_changed.contains(&(on_change_file, on_change_block)) {
                     return Err(anyhow::anyhow!(
                         r#"Block "{}" in staged file "{}" has changed, but its OnChange target "{}" in "{}" has not"#,

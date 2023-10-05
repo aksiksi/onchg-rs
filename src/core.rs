@@ -46,21 +46,18 @@ pub enum ThenChange {
 }
 
 impl ThenChange {
-    pub fn get_targets_as_keys<'a>(&'a self, default_path: &'a Path) -> Vec<(&Path, &str)> {
-        let mut targets = Vec::new();
+    /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
+    pub fn get_targets_as_keys<'a>(
+        &'a self,
+        default_path: &'a Path,
+    ) -> Option<impl Iterator<Item = (&Path, &str)> + 'a> {
         match &self {
-            ThenChange::NoTarget | ThenChange::Unset => (),
-            ThenChange::BlockTarget(targets_) => {
-                targets.extend(targets_);
-            }
-        }
-        targets
-            .into_iter()
-            .map(|t| match &t.file {
+            ThenChange::NoTarget | ThenChange::Unset => None,
+            ThenChange::BlockTarget(targets) => Some(targets.iter().map(move |t| match &t.file {
                 Some(path) => (path.as_path(), t.block.as_str()),
                 None => (default_path, t.block.as_str()),
-            })
-            .collect()
+            })),
+        }
     }
 }
 
@@ -526,18 +523,14 @@ impl FileSet {
         blocks
     }
 
-    /// Returns a map of all blocks in the file set.
-    pub fn on_change_blocks_in_file<P: AsRef<Path>>(&self, path: P) -> Option<Vec<&OnChangeBlock>> {
-        let mut blocks = Vec::new();
-        match self.files.get(path.as_ref()) {
-            None => None,
-            Some(file) => {
-                for (_, block) in file.blocks.iter() {
-                    blocks.push(block);
-                }
-                Some(blocks)
-            }
-        }
+    /// Returns a iterator over all of the blocks in a specific file.
+    pub fn on_change_blocks_in_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Option<impl Iterator<Item = &OnChangeBlock>> {
+        self.files
+            .get(path.as_ref())
+            .map(|file| file.blocks.iter().map(|(_, v)| v))
     }
 
     pub fn get_on_change_block<P: AsRef<Path>>(
