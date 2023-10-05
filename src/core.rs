@@ -558,7 +558,7 @@ impl FileSet {
 
 #[cfg(test)]
 mod test {
-    use crate::helpers::TestDir;
+    use crate::test_helpers::TestDir;
 
     use super::*;
 

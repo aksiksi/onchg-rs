@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 mod core;
 mod git;
-#[cfg(test)]
-mod helpers;
 mod parser;
+#[cfg(test)]
+mod test_helpers;
 
 use clap::Parser as CliParser;
 use parser::Parser;

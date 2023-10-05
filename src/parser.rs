@@ -110,7 +110,7 @@ impl Parser {
 
 #[cfg(test)]
 mod test {
-    use crate::helpers::GitRepo;
+    use crate::test_helpers::GitRepo;
 
     use super::*;
 
