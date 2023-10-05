@@ -13,7 +13,7 @@
 //!             |
 //! F2 -> [B1, B2, ..., BN]
 use std::cell::OnceCell;
-use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
@@ -23,18 +23,16 @@ use regex::Regex;
 
 use crate::git::{Hunk, Line};
 
-const DEFAULT_ON_CHANGE_BLOCK_NAME: &str = "default";
-
 thread_local! {
     // TODO(aksiksi): Clean these patterns up by making them more specific.
-    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*OnChange\((\w*)\).*$").unwrap());
+    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*OnChange\((.*)\).*$").unwrap());
     static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*ThenChange\((.*)\).*$").unwrap());
 }
 
 #[derive(Clone, Debug)]
 pub struct ThenChangeTarget {
-    pub block: String,
-    pub file: Option<PathBuf>,
+    block: String,
+    file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -45,47 +43,44 @@ pub enum ThenChange {
     BlockTarget(Vec<ThenChangeTarget>),
 }
 
-impl ThenChange {
-    /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
-    pub fn get_targets_as_keys<'a>(
-        &'a self,
-        default_path: &'a Path,
-    ) -> Option<impl Iterator<Item = (&Path, &str)> + 'a> {
-        match &self {
-            ThenChange::NoTarget | ThenChange::Unset => None,
-            ThenChange::BlockTarget(targets) => Some(targets.iter().map(move |t| match &t.file {
-                Some(path) => (path.as_path(), t.block.as_str()),
-                None => (default_path, t.block.as_str()),
-            })),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct OnChangeBlock {
-    pub name: String,
-    pub start_line: u32,
-    pub end_line: u32,
-    pub then_change: ThenChange,
+    // The name would be None for an untargetable block.
+    name: Option<String>,
+    start_line: u32,
+    end_line: u32,
+    then_change: ThenChange,
 }
 
 impl OnChangeBlock {
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or("<unnamed>")
+    }
+
+    pub fn start_line(&self) -> u32 {
+        self.start_line
+    }
+
+    pub fn end_line(&self) -> u32 {
+        self.end_line
+    }
+
     pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
         let mut old_start_line = None;
         let mut old_end_line = None;
         let mut lines_removed = Vec::new();
         for line in &hunk.lines {
-            match line {
+            match *line {
                 Line::Add(l) => {
                     // A line was added inside the block.
-                    if *l >= self.start_line && *l <= self.end_line {
+                    if l >= self.start_line && l <= self.end_line {
                         return true;
                     }
                 }
                 Line::Remove(l) => {
                     // Keep track of removed blocks to check against the old
                     // block lines.
-                    lines_removed.push(*l);
+                    lines_removed.push(l);
                 }
                 Line::Context(old, new) => {
                     // Check if this context line is a start or end line for the block.
@@ -94,7 +89,6 @@ impl OnChangeBlock {
                     // a start or end line. If a block start/end is removed, the block is
                     // invalid. If it was removed and re-added, it will be picked up as
                     // an added line.
-                    let (old, new) = (*old, *new);
                     if self.start_line == new {
                         old_start_line = Some(old);
                     } else if self.end_line == new {
@@ -128,11 +122,26 @@ impl OnChangeBlock {
 
         false
     }
+
+    /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
+    /// If a target has no path set, it will be replaced with the provided file path.
+    pub fn get_then_change_targets_as_keys<'a>(
+        &'a self,
+        default_path: &'a Path,
+    ) -> Option<impl Iterator<Item = (&Path, &str)> + 'a> {
+        match &self.then_change {
+            ThenChange::NoTarget | ThenChange::Unset => None,
+            ThenChange::BlockTarget(targets) => Some(targets.iter().map(move |t| match &t.file {
+                Some(path) => (path.as_path(), t.block.as_str()),
+                None => (default_path, t.block.as_str()),
+            })),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct File {
-    blocks: HashMap<String, OnChangeBlock>,
+    blocks: Vec<OnChangeBlock>,
 }
 
 impl File {
@@ -236,7 +245,9 @@ impl File {
         let path = path.as_ref().canonicalize()?;
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
-        let mut blocks: HashMap<String, OnChangeBlock> = HashMap::new();
+        let mut blocks: Vec<OnChangeBlock> = Vec::new();
+        let mut block_name_to_start_line: HashMap<String, usize> = HashMap::new();
+
         // Set of files that need to be parsed based on OnChange targets seen in this file.
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
 
@@ -248,7 +259,7 @@ impl File {
             InBlock,
         }
         let mut state = ParseState::Searching;
-        let mut block_name: Option<String> = None;
+        let mut current_block: Option<OnChangeBlock> = None;
         for (line_num, line) in reader.lines().enumerate() {
             let line = match line {
                 Ok(l) => l,
@@ -262,69 +273,61 @@ impl File {
             match state {
                 ParseState::Searching => {
                     // Try to parse the line as a OnChange.
-                    // TODO(aksiksi): OnChange should allow empty OR :<name>.
                     let captures = ON_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
-
-                    if let Some(captures) = captures {
-                        let mut parsed = String::from(captures.get(1).unwrap().as_str().trim());
-                        if parsed.is_empty() {
-                            // Unnamed OnChange block.
-                            parsed = String::from(DEFAULT_ON_CHANGE_BLOCK_NAME);
-                        }
-                        block_name = Some(parsed);
-                    } else {
+                    if captures.is_none() {
                         continue;
                     }
+                    let captures = captures.unwrap();
 
-                    match blocks.entry(block_name.clone().unwrap()) {
-                        Entry::Occupied(e) => {
-                            let block = e.get();
+                    let parsed = String::from(captures.get(1).unwrap().as_str().trim());
+                    let current_block_name = if parsed.is_empty() {
+                        // An unnamed OnChange block is untargetable by other blocks.
+                        None
+                    } else {
+                        Some(parsed)
+                    };
+
+                    // Check for a duplicate block in the file.
+                    if let Some(block_name) = &current_block_name {
+                        if block_name_to_start_line.contains_key(block_name) {
                             return Err(anyhow::anyhow!(
-                                "duplicate block names found on lines {} and {}: {}",
-                                block.start_line,
+                                "duplicate block name \"{}\" found on lines {} and {} of {}",
+                                block_name,
+                                block_name_to_start_line[block_name],
                                 line_num,
-                                block.name
+                                path.display(),
                             ));
                         }
-                        Entry::Vacant(e) => {
-                            let block = OnChangeBlock {
-                                name: block_name.clone().unwrap(),
-                                start_line: line_num as u32,
-                                end_line: 0,
-                                then_change: ThenChange::Unset,
-                            };
-                            e.insert(block);
-                        }
+                        block_name_to_start_line.insert(block_name.clone(), line_num);
                     }
+
+                    current_block = Some(OnChangeBlock {
+                        // Move the block name out.
+                        name: current_block_name,
+                        start_line: line_num as u32,
+                        end_line: 0,
+                        then_change: ThenChange::Unset,
+                    });
+
                     state = ParseState::InBlock;
                 }
                 ParseState::InBlock => {
                     // Try to parse the line as a ThenChange.
-                    let block_name = block_name.as_ref();
-
                     let captures = THEN_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line));
                     if captures.is_none() {
                         continue;
                     }
-
-                    // We have a valid OnChange.
                     let captures = captures.unwrap();
 
-                    if block_name.is_none() {
+                    if current_block.is_none() {
                         return Err(anyhow::anyhow!(
                             "ThenChange found before OnChange on line {}",
                             line_num
                         ));
                     }
-
-                    let block_name = block_name.unwrap();
-                    if !blocks.contains_key(block_name) {
-                        return Err(anyhow::anyhow!(
-                            "block {} does not exist, but found ThenChange on line {}",
-                            block_name,
-                            line_num
-                        ));
-                    }
+                    let mut block = current_block
+                        .take()
+                        .expect("current_block should be set here");
 
                     let block_target = Self::build_then_change(
                         &mut files_to_parse,
@@ -334,15 +337,10 @@ impl File {
                         captures.get(1).unwrap().as_str(),
                     )?;
 
-                    let block = blocks.get(block_name).unwrap().clone();
-                    blocks.insert(
-                        block.name.clone(),
-                        OnChangeBlock {
-                            end_line: line_num as u32,
-                            then_change: block_target,
-                            ..block
-                        },
-                    );
+                    block.end_line = line_num as u32;
+                    block.then_change = block_target;
+
+                    blocks.push(block);
 
                     state = ParseState::Searching;
                 }
@@ -353,11 +351,15 @@ impl File {
             ParseState::Searching => Ok((File { blocks }, files_to_parse)),
             // If we've hit EOF but are not currently searching for a block, it means
             // we have an unclosed block.
-            _ => Err(anyhow::anyhow!(
-                "unexpected EOF in {} while looking for ThenChange for block \":{}\"",
-                path.display(),
-                block_name.unwrap(),
-            )),
+            _ => {
+                let current_block = current_block.expect("current_block should be set here");
+                Err(anyhow::anyhow!(
+                    "unexpected EOF in {} while looking for ThenChange for block \"{}\" on line {}",
+                    path.display(),
+                    current_block.name(),
+                    current_block.start_line,
+                ))
+            }
         }
     }
 }
@@ -372,7 +374,7 @@ impl FileSet {
     fn validate_block_target(
         &self,
         path: &Path,
-        block: &str,
+        block: &OnChangeBlock,
         target: &ThenChangeTarget,
         blocks: &HashMap<(&Path, &str), &OnChangeBlock>,
     ) -> Result<()> {
@@ -381,34 +383,50 @@ impl FileSet {
             let block_key = (file.as_ref(), target_block.as_str());
             if !blocks.contains_key(&block_key) {
                 return Err(anyhow::anyhow!(
-                    r#"block "{}" in file "{}" has invalid OnChange target "{}:{}""#,
-                    block,
+                    r#"block "{}" in file "{}" has invalid OnChange target "{}:{}" (line {})"#,
+                    block.name(),
                     path.display(),
                     file.display(),
-                    target_block
+                    target_block,
+                    block.end_line,
                 ));
             }
         }
         Ok(())
     }
 
+    /// Returns a map of all _targetable_ blocks in the file set.
+    fn on_change_blocks(&self) -> HashMap<(&Path, &str), &OnChangeBlock> {
+        let mut blocks = HashMap::with_capacity(self.num_blocks);
+        for (path, file) in self.files.iter() {
+            for block in file.blocks.iter() {
+                if block.name.is_none() {
+                    continue;
+                }
+                blocks.insert((path.as_path(), block.name()), block);
+            }
+        }
+        blocks
+    }
+
     fn validate(&self) -> Result<()> {
         let blocks = self.on_change_blocks();
 
         for (path, file) in &self.files {
-            for (name, block) in &file.blocks {
+            for block in &file.blocks {
                 match &block.then_change {
                     ThenChange::NoTarget => {}
                     ThenChange::BlockTarget(target_blocks) => {
                         for target in target_blocks {
-                            Self::validate_block_target(&self, path, name, target, &blocks)?;
+                            Self::validate_block_target(&self, path, block, target, &blocks)?;
                         }
                     }
                     ThenChange::Unset => {
                         return Err(anyhow::anyhow!(
-                            r#"block "{}" in file "{}" has an invalid OnChange target"#,
-                            block.name,
-                            path.display()
+                            r#"block "{}" in file "{}" has an unset OnChange target (line {})"#,
+                            block.name(),
+                            path.display(),
+                            block.end_line,
                         ));
                     }
                 }
@@ -459,7 +477,6 @@ impl FileSet {
     /// Recursively walks through all files in the given path and parses them.
     ///
     /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
-    #[allow(unused)]
     pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
         let root_path = path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
@@ -512,36 +529,12 @@ impl FileSet {
         Ok(file_set)
     }
 
-    /// Returns a map of all blocks in the file set.
-    pub fn on_change_blocks(&self) -> HashMap<(&Path, &str), &OnChangeBlock> {
-        let mut blocks = HashMap::with_capacity(self.num_blocks);
-        for (path, file) in self.files.iter() {
-            for (name, block) in file.blocks.iter() {
-                blocks.insert((path.as_path(), name.as_str()), block);
-            }
-        }
-        blocks
-    }
-
     /// Returns a iterator over all of the blocks in a specific file.
     pub fn on_change_blocks_in_file<P: AsRef<Path>>(
         &self,
         path: P,
     ) -> Option<impl Iterator<Item = &OnChangeBlock>> {
-        self.files
-            .get(path.as_ref())
-            .map(|file| file.blocks.iter().map(|(_, v)| v))
-    }
-
-    pub fn get_on_change_block<P: AsRef<Path>>(
-        &self,
-        path: P,
-        block_name: &str,
-    ) -> Option<&OnChangeBlock> {
-        match self.files.get(path.as_ref()) {
-            None => None,
-            Some(file) => file.blocks.get(block_name),
-        }
+        self.files.get(path.as_ref()).map(|file| file.blocks.iter())
     }
 
     pub fn files(&self) -> Vec<&Path> {
@@ -560,9 +553,9 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:default)",
+                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:other)",
             ),
-            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+            ("f2.txt", "OnChange(other)\nThenChange(f1.txt:default)"),
         ];
         let d = TestDir::from_files(files);
         FileSet::from_directory(d.path()).unwrap();
@@ -573,23 +566,25 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:default)",
+                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)",
             ),
-            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+            ("f2.txt", "OnChange(other)\nThenChange()"),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
         FileSet::from_files(&file_names, d.path()).unwrap();
     }
 
+    // TODO(aksiksi): Add more tests for invalid cases.
+
     #[test]
     fn test_from_files_invalid_block_target_file_path() {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f3.txt:default)",
+                "OnChange(default)\nabdbbda\nadadd\nThenChange(f3.txt:default)",
             ),
-            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+            ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
@@ -607,9 +602,9 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:invalid)",
+                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:invalid)",
             ),
-            ("f2.txt", "OnChange()\nThenChange(f1.txt:default)"),
+            ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
@@ -617,5 +612,21 @@ mod test {
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
         assert!(err.contains("has invalid OnChange target"));
+    }
+
+    #[test]
+    fn test_from_files_duplicate_block_in_file() {
+        let files = &[(
+            "f1.txt",
+            "OnChange(default)\nabdbbda\nadadd\nThenChange(:other)
+             OnChange(default)\nabdbbda\nThenChange(:other)
+             OnChange(other)\nabdbbda\nadadd\nThenChange(:default)",
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0).collect::<Vec<_>>();
+        let res = FileSet::from_files(&file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 5"#));
     }
 }
