@@ -33,7 +33,7 @@ impl Parser {
             if changed_blocks.contains(&block_idx) {
                 continue;
             }
-            let block = &blocks[block_idx];
+            let block = blocks[block_idx];
             if block.is_changed_by_hunk(hunk) {
                 changed_blocks.insert(block_idx);
             }
