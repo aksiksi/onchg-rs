@@ -384,4 +384,47 @@ mod test {
         ]);
         parse_and_validate(d.path(), 0);
     }
+
+    #[test]
+    fn test_from_git_repo_nested_blocks() {
+        let files = &[
+            (
+                "f1.txt",
+                "OnChange(outer)
+                \nabdbbda\nadadd
+                \n
+                OnChange(inner)\n
+                bbbb\n
+                ThenChange(f2.txt:first)\n
+                \n
+                ThenChange()\n",
+            ),
+            (
+                "f2.txt",
+                "OnChange(first)\nThenChange(f1.txt:inner)\n
+                 OnChange(second)\nThenChange()\n",
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Delete one line in f1:inner and stage it. Also stage f2:first.
+        d.write_and_add_files(&[
+            (
+                "f1.txt",
+                "OnChange(outer)
+                \nabdbbda\nadadd
+                \n
+                OnChange(inner)\n
+                ThenChange(f2.txt:first)\n
+                \n
+                ThenChange()\n",
+            ),
+            (
+                "f2.txt",
+                "OnChange(first)\naaaa\nThenChange(f1.txt:inner)\n
+                 OnChange(second)\nThenChange()\n",
+            ),
+        ]);
+        parse_and_validate(d.path(), 0);
+    }
 }
