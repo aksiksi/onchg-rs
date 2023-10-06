@@ -169,14 +169,15 @@ impl File {
                 None
             };
             let relative_path = path.parent().unwrap().join(&file_path);
-            if root_with_path.is_some() && root_with_path.as_ref().unwrap().exists() {
-                file_path = root_with_path.unwrap();
-            } else if relative_path.exists() {
-                // Otherwise, assume it's a relative path.
+
+            // Always prioritize the relative path case (i.e., targets in the same directory).
+            if relative_path.exists() {
                 file_path = relative_path;
+            } else if root_with_path.is_some() && root_with_path.as_ref().unwrap().exists() {
+                file_path = root_with_path.unwrap();
             } else {
                 return Err(anyhow::anyhow!(
-                    r#"OnChange target file "{}" does not exist on line {}"#,
+                    r#"OnChange target file "{}" on line {} does not exist"#,
                     file_path.display(),
                     line_num
                 ));
@@ -640,6 +641,20 @@ mod test {
     }
 
     #[test]
+    fn test_from_files_relative_target() {
+        let files = &[
+            (
+                "abc/f1.txt",
+                "OnChange()\nabdbbda\nadadd\nThenChange(../f2.txt:other)",
+            ),
+            ("f2.txt", "OnChange(other)\nThenChange()"),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        FileSet::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
     fn test_from_files_invalid_block_target_file_path() {
         let files = &[
             (
@@ -655,7 +670,7 @@ mod test {
         let err = res.unwrap_err().to_string();
         assert_eq!(
             err,
-            r#"OnChange target file "f3.txt" does not exist on line 4"#
+            r#"OnChange target file "f3.txt" on line 4 does not exist"#
         );
     }
 

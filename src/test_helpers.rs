@@ -32,6 +32,10 @@ impl TestDir {
 
     pub fn write_file_raw<P: AsRef<Path>>(&self, path: P, content: &[u8]) {
         let path = self.path().join(path.as_ref());
+        if let Some(directory) = path.parent() {
+            // Create the directory tree first.
+            std::fs::create_dir_all(directory).unwrap();
+        }
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(content).unwrap();
     }

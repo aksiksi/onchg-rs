@@ -166,6 +166,52 @@ mod test {
     }
 
     #[test]
+    fn test_from_git_repo_relative_path_priority() {
+        let files = &[
+            // Files at the root.
+            (
+                "f1.txt",
+                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+            ),
+            (
+                "f2.txt",
+                "OnChange(default)\nThenChange(abc/f1.txt:default)\n",
+            ),
+            // Files in a subdirectory.
+            (
+                "abc/f1.txt",
+                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+            ),
+            (
+                "abc/f2.txt",
+                "OnChange(default)\nThenChange(f1.txt:default)\n",
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Change and stage both abc/f1.txt and f2.txt.
+        // This should fail because abc/f1.txt depends on abc/f2.txt, not f2.txt.
+        d.write_file(
+            "abc/f1.txt",
+            "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
+        );
+        d.write_file(
+            "f2.txt",
+            "OnChange(default)\nadadd\nThenChange(abc/f1.txt:default)\n",
+        );
+        d.add_all_files();
+        assert!(Parser::from_git_repo(d.path()).is_err());
+
+        // Now change and stage abc/f2.txt.
+        d.write_file(
+            "abc/f2.txt",
+            "OnChange(default)\nabc\nThenChange(f1.txt:default)\n",
+        );
+        d.add_all_files();
+        Parser::from_git_repo(d.path()).unwrap();
+    }
+
+    #[test]
     fn test_from_git_repo_multiple_blocks_in_file() {
         let files = &[
             (
