@@ -1,0 +1,8 @@
+[cli_coverage]
+features = ""
+
+[git_coverage]
+features = "git"
+
+[report]
+out = ["Html", "Xml"]

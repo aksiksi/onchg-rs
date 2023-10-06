@@ -6,13 +6,17 @@ check:
 build: check
 	cargo build
 
-test: build
+test: check
 	cargo test -- --nocapture
 	cargo test --features git -- --nocapture
 
-ci: build
+ci:
 	cargo test --verbose -- --nocapture
 	cargo test --verbose --features git -- --nocapture
+
+coverage:
+	cargo install cargo-tarpaulin
+	cargo tarpaulin
 
 fmt:
 	cargo fmt

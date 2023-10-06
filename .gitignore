@@ -1,9 +1,7 @@
 /target
 Cargo.lock
 
+# Code coverage
+*.xml
+*.html
 
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
