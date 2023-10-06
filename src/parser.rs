@@ -182,15 +182,13 @@ impl Parser {
                             target_block_name: Some(on_change_block.to_string()),
                         });
                     }
-                } else {
-                    if !files_changed.contains(on_change_file) {
-                        violations.push(OnChangeViolation {
-                            file: path.to_owned(),
-                            block: block.clone(),
-                            target_file: on_change_file.to_owned(),
-                            target_block_name: None,
-                        });
-                    }
+                } else if !files_changed.contains(on_change_file) {
+                    violations.push(OnChangeViolation {
+                        file: path.to_owned(),
+                        block: block.clone(),
+                        target_file: on_change_file.to_owned(),
+                        target_block_name: None,
+                    });
                 }
             }
         }
@@ -201,9 +199,9 @@ impl Parser {
 
 #[cfg(test)]
 mod test {
-    use crate::test_helpers::GitRepo;
-
     use super::*;
+    use crate::test_helpers::*;
+    use indoc::indoc;
 
     fn parse_and_validate(path: &Path, num_violations: usize) {
         let p = Parser::from_git_repo(path).unwrap();
@@ -211,21 +209,87 @@ mod test {
     }
 
     #[test]
+    fn test_from_directory() {
+        let files = &[
+            (
+                "f1.html",
+                indoc! {"
+                    <html>
+                        <body>
+                            <!-- LINT.OnChange(html) -->
+                            <h1>Hello</h1>
+                            <!-- LINT.ThenChange(f2.cpp:cpp) -->
+                            <p>abc</p>
+                            <!-- LINT.OnChange(other-html) -->
+                            <p>def</p>
+                            <!-- LINT.ThenChange() -->
+                        </body>
+                    </html>
+                "},
+            ),
+            (
+                "f2.cpp",
+                indoc! {r#"
+                    class A {
+                        A() {
+                            // LINT.OnChange()
+                            int a = 10;
+                            // LINT.ThenChange(abc/f3.py:python)
+                        }
+                    }
+                    int main() {
+                        // LINT.OnChange(cpp)
+                        printf("Hello, world!\n);
+                        // LINT.ThenChange(f1.html:html)
+                    }
+                "#},
+            ),
+            (
+                "abc/f3.py",
+                indoc! {r#"
+                    class A:
+                        def __init__(self):
+                            # LINT.OnChange(python)
+                            self.v = 10
+                            # LINT.ThenChange(f1.html:other-html)
+
+                    if __name__ == "__main__":
+                        print(A())
+                "#},
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        Parser::from_directory(d.path()).unwrap();
+    }
+
+    #[test]
     fn test_from_git_repo() {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:default)\n",
             ),
-            ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)\n"),
-            ("f3.txt", "OnChange(this)\nThenChange(f1.txt)\n"),
+            (
+                "f2.txt",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)\n",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange(this)\n
+                 LINT.ThenChange(f1.txt)\n",
+            ),
         ];
         let d = GitRepo::from_files(files);
 
         // Delete one line from f1.txt and stage it.
         d.write_and_add_files(&[(
             "f1.txt",
-            "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
+            "LINT.OnChange(default)\n
+             adadd\n
+             LINT.ThenChange(f2.txt:default)\n",
         )]);
         // This should fail because f1.txt has changed but f2.txt has not.
         parse_and_validate(d.path(), 1);
@@ -233,12 +297,19 @@ mod test {
         // Now stage the other file and ensure the parser succeeds.
         d.write_and_add_files(&[(
             "f2.txt",
-            "OnChange(default)\nadadd\nThenChange(f1.txt:default)\n",
+            "LINT.OnChange(default)\n
+             adadd\n
+             LINT.ThenChange(f1.txt:default)\n",
         )]);
         parse_and_validate(d.path(), 0);
 
         // Now stage f3 and ensure the parser succeeds.
-        d.write_and_add_files(&[("f3.txt", "OnChange(this)\nabcde\nThenChange(f1.txt)\n")]);
+        d.write_and_add_files(&[(
+            "f3.txt",
+            "LINT.OnChange(this)\n
+             abcde\n
+             LINT.ThenChange(f1.txt)\n",
+        )]);
         parse_and_validate(d.path(), 0);
     }
 
@@ -248,20 +319,26 @@ mod test {
             // Files at the root.
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:default)\n",
             ),
             (
                 "f2.txt",
-                "OnChange(default)\nThenChange(abc/f1.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(abc/f1.txt:default)\n",
             ),
             // Files in a subdirectory.
             (
                 "abc/f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:default)\n",
             ),
             (
                 "abc/f2.txt",
-                "OnChange(default)\nThenChange(f1.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)\n",
             ),
         ];
         let d = GitRepo::from_files(files);
@@ -271,11 +348,15 @@ mod test {
         d.write_and_add_files(&[
             (
                 "abc/f1.txt",
-                "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 adadd\n
+                 LINT.ThenChange(f2.txt:default)\n",
             ),
             (
                 "f2.txt",
-                "OnChange(default)\nadadd\nThenChange(abc/f1.txt:default)\n",
+                "LINT.OnChange(default)\n
+                 adadd\n
+                 LINT.ThenChange(abc/f1.txt:default)\n",
             ),
         ]);
         parse_and_validate(d.path(), 1);
@@ -283,7 +364,9 @@ mod test {
         // Now change and stage abc/f2.txt.
         d.write_and_add_files(&[(
             "abc/f2.txt",
-            "OnChange(default)\nabc\nThenChange(f1.txt:default)\n",
+            "LINT.OnChange(default)\n
+             abc\n
+             LINT.ThenChange(f1.txt:default)\n",
         )]);
         parse_and_validate(d.path(), 0);
     }
@@ -293,14 +376,24 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n
-                 some\ntext\t\there\n
-                 OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)\n",
+                indoc! {"
+                    LINT.OnChange(default)\n
+                    abdbbda\nadadd\n
+                    LINT.ThenChange(f2.txt:default)\n
+                    some\ntext\t\there\n
+                    LINT.OnChange()\n
+                    abdbbda\nadadd\n
+                    LINT.ThenChange(f2.txt:other)\n
+                "},
             ),
             (
                 "f2.txt",
-                "OnChange(default)\nThenChange(f1.txt:default)\n
-                 OnChange(other)\nThenChange(f1.txt:default)\n",
+                indoc! {"
+                    LINT.OnChange(default)\n
+                    LINT.ThenChange(f1.txt:default)\n
+                    LINT.OnChange(other)\n
+                    LINT.ThenChange(f1.txt:default)\n
+                "},
             ),
         ];
         let d = GitRepo::from_files(files);
@@ -308,8 +401,14 @@ mod test {
         // Delete one unrelated line from f1.txt and stage it.
         d.write_and_add_files(&[(
             "f1.txt",
-            "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n
-                 OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)\n",
+            indoc! {"
+                LINT.OnChange(default)\n
+                abdbbda\nadadd\n
+                LINT.ThenChange(f2.txt:default)\n
+                LINT.OnChange()\n
+                abdbbda\nadadd\n
+                LINT.ThenChange(f2.txt:other)\n
+            "},
         )]);
         // This should pass because no blocks in f1.txt have changed.
         parse_and_validate(d.path(), 0);
@@ -317,8 +416,14 @@ mod test {
         // Delete one line from the two blocks in f1.txt and stage it.
         d.write_and_add_files(&[(
             "f1.txt",
-            "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n
-                 OnChange()\nabdbbda\nThenChange(f2.txt:other)\n",
+            indoc! {"
+                LINT.OnChange(default)\n
+                abdbbda\n
+                LINT.ThenChange(f2.txt:default)\n
+                LINT.OnChange()\n
+                abdbbda\n
+                LINT.ThenChange(f2.txt:other)\n
+            "},
         )]);
         // This should fail because f1.txt has changed but f2.txt has not.
         parse_and_validate(d.path(), 2);
@@ -327,16 +432,27 @@ mod test {
         // pass, but second will not.
         d.write_and_add_files(&[(
             "f2.txt",
-            "OnChange(default)\nabba\nThenChange(f1.txt:default)
-                 OnChange(other)\nThenChange(f1.txt:default)\n",
+            indoc! {"
+                LINT.OnChange(default)\n
+                abba\n
+                LINT.ThenChange(f1.txt:default)\n
+                LINT.OnChange(other)\n
+                LINT.ThenChange(f1.txt:default)\n
+            "},
         )]);
         parse_and_validate(d.path(), 1);
 
         // Now change the other block in f2 and ensure the parser succeeds.
         d.write_and_add_files(&[(
             "f2.txt",
-            "OnChange(default)\nabba\nThenChange(f1.txt:default)
-                 OnChange(other)\nabbba\nThenChange(f1.txt:default)\n",
+            indoc! {"
+                LINT.OnChange(default)\n
+                abba\n
+                LINT.ThenChange(f1.txt:default)\n
+                LINT.OnChange(other)\n
+                abba\n
+                LINT.ThenChange(f1.txt:default)\n
+            "},
         )]);
         parse_and_validate(d.path(), 0);
     }
@@ -346,16 +462,24 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:potato)\n",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:potato)\n",
             ),
-            ("f2.txt", "OnChange(potato)\nThenChange(f1.txt:default)\n"),
+            (
+                "f2.txt",
+                "LINT.OnChange(potato)\n
+                 LINT.ThenChange(f1.txt:default)\n",
+            ),
             (
                 "f3.txt",
-                "OnChange()\nThenChange(f1.txt:default, f2.txt:potato, f4.txt:something)\n",
+                "LINT.OnChange()\n
+                 LINT.ThenChange(f1.txt:default, f2.txt:potato, f4.txt:something)\n",
             ),
             (
                 "f4.txt",
-                "OnChange(something)\nThenChange(f1.txt:default, f2.txt:potato)\n",
+                "LINT.OnChange(something)\n
+                 LINT.ThenChange(f1.txt:default, f2.txt:potato)\n",
             ),
         ];
         let d = GitRepo::from_files(files);
@@ -363,7 +487,9 @@ mod test {
         // Add a line to f3 and stage it.
         d.write_and_add_files(&[(
             "f3.txt",
-            "OnChange()\nhello,there!\nThenChange(f1.txt:default, f2.txt:potato, f4.txt:something)\n",
+            "LINT.OnChange()\n
+             hello,there!\n
+             LINT.ThenChange(f1.txt:default, f2.txt:potato, f4.txt:something)\n",
         )]);
         parse_and_validate(d.path(), 3);
 
@@ -371,15 +497,21 @@ mod test {
         d.write_and_add_files(&[
             (
                 "f1.txt",
-                "OnChange(default)\nadadd\nThenChange(f2.txt:potato)\n",
+                "LINT.OnChange(default)\n
+                 adadd\n
+                 LINT.ThenChange(f2.txt:potato)\n",
             ),
             (
                 "f2.txt",
-                "OnChange(potato)\nadadd\nThenChange(f1.txt:default)\n",
+                "LINT.OnChange(potato)\n
+                 adadd\n
+                 LINT.ThenChange(f1.txt:default)\n",
             ),
             (
                 "f4.txt",
-                "OnChange(something)\nnewlinehere\n\nThenChange(f1.txt:default, f2.txt:potato)\n",
+                "LINT.OnChange(something)\n
+                 newlinehere\n\n
+                 LINT.ThenChange(f1.txt:default, f2.txt:potato)\n",
             ),
         ]);
         parse_and_validate(d.path(), 0);
@@ -390,19 +522,21 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(outer)
+                "LINT.OnChange(outer)
                 \nabdbbda\nadadd
                 \n
-                OnChange(inner)\n
+                LINT.OnChange(inner)\n
                 bbbb\n
-                ThenChange(f2.txt:first)\n
+                LINT.ThenChange(f2.txt:first)\n
                 \n
-                ThenChange()\n",
+                LINT.ThenChange()\n",
             ),
             (
                 "f2.txt",
-                "OnChange(first)\nThenChange(f1.txt:inner)\n
-                 OnChange(second)\nThenChange()\n",
+                "LINT.OnChange(first)\n
+                 LINT.ThenChange(f1.txt:inner)\n
+                 LINT.OnChange(second)\n
+                 LINT.ThenChange()\n",
             ),
         ];
         let d = GitRepo::from_files(files);
@@ -411,18 +545,18 @@ mod test {
         d.write_and_add_files(&[
             (
                 "f1.txt",
-                "OnChange(outer)
+                "LINT.OnChange(outer)
                 \nabdbbda\nadadd
                 \n
-                OnChange(inner)\n
-                ThenChange(f2.txt:first)\n
+                LINT.OnChange(inner)\n
+                LINT.ThenChange(f2.txt:first)\n
                 \n
-                ThenChange()\n",
+                LINT.ThenChange()\n",
             ),
             (
                 "f2.txt",
-                "OnChange(first)\naaaa\nThenChange(f1.txt:inner)\n
-                 OnChange(second)\nThenChange()\n",
+                "LINT.OnChange(first)\naaaa\nLINT.ThenChange(f1.txt:inner)\n
+                 LINT.OnChange(second)\nLINT.ThenChange()\n",
             ),
         ]);
         parse_and_validate(d.path(), 0);

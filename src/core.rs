@@ -25,8 +25,8 @@ use crate::git::{Hunk, Line};
 
 thread_local! {
     // TODO(aksiksi): Clean these patterns up by making them more specific.
-    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*OnChange\((.*)\).*$").unwrap());
-    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*ThenChange\((.*)\).*$").unwrap());
+    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*LINT\.OnChange\((.*)\).*$").unwrap());
+    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*LINT\.ThenChange\((.*)\).*$").unwrap());
 }
 
 #[derive(Clone, Debug)]
@@ -600,9 +600,15 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:other)",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
             ),
-            ("f2.txt", "OnChange(other)\nThenChange(f1.txt:default)"),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
         ];
         let d = TestDir::from_files(files);
         FileSet::from_directory(d.path()).unwrap();
@@ -613,9 +619,16 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)",
+                "LINT.OnChange()\n
+                 abdbbda\n
+                 adadd\n
+                 LINT.ThenChange(f2.txt:other)",
             ),
-            ("f2.txt", "OnChange(other)\nThenChange()"),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -627,10 +640,20 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
             ),
-            ("f2.txt", "OnChange(other)\nThenChange()"),
-            ("f3.txt", "OnChange(this)\nThenChange(f1.txt)"),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange(this)\n
+                 LINT.ThenChange(f1.txt)",
+            ),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -642,9 +665,15 @@ mod test {
         let files = &[
             (
                 "abc/f1.txt",
-                "OnChange()\nabdbbda\nadadd\nThenChange(../f2.txt:other)",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(../f2.txt:other)",
             ),
-            ("f2.txt", "OnChange(other)\nThenChange()"),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -656,9 +685,15 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f3.txt:default)",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f3.txt:default)",
             ),
-            ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
+            (
+                "f2.txt",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -667,7 +702,7 @@ mod test {
         let err = res.unwrap_err().to_string();
         assert_eq!(
             err,
-            r#"OnChange target file "f3.txt" on line 4 does not exist"#
+            r#"OnChange target file "f3.txt" on line 6 does not exist"#
         );
     }
 
@@ -676,9 +711,15 @@ mod test {
         let files = &[
             (
                 "f1.txt",
-                "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:invalid)",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:invalid)",
             ),
-            ("f2.txt", "OnChange(default)\nThenChange(f1.txt:default)"),
+            (
+                "f2.txt",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
         ];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -692,25 +733,33 @@ mod test {
     fn test_from_files_duplicate_block_in_file() {
         let files = &[(
             "f1.txt",
-            "OnChange(default)\nabdbbda\nadadd\nThenChange(:other)
-             OnChange(default)\nabdbbda\nThenChange(:other)
-             OnChange(other)\nabdbbda\nadadd\nThenChange(:default)",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.ThenChange(:other)
+             LINT.OnChange(default)\n
+             abdbbda\n
+             LINT.ThenChange(:other)
+             LINT.OnChange(other)\n
+             abdbbda\nadadd\n
+             LINT.ThenChange(:default)",
         )];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
         let res = FileSet::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
-        assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 5"#));
+        assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 7"#));
     }
 
     #[test]
     fn test_from_files_nested_on_change() {
         let files = &[(
             "f1.txt",
-            "OnChange(default)\nabdbbda\nadadd\n
-             OnChange(other)\nThenChange(:other)\n
-             ThenChange()",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.OnChange(other)\n
+             LINT.ThenChange(:other)\n
+             LINT.ThenChange()",
         )];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -721,8 +770,10 @@ mod test {
     fn test_from_files_nested_on_change_unbalanced() {
         let files = &[(
             "f1.txt",
-            "OnChange(default)\nabdbbda\nadadd\n
-             OnChange(other)\nThenChange(:other)",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.OnChange(other)\n
+             LINT.ThenChange(:other)",
         )];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
@@ -736,7 +787,7 @@ mod test {
 
     #[test]
     fn test_from_files_eof_in_block() {
-        let files = &[("f1.txt", "OnChange(default)\nabdbbda\nadadd\n")];
+        let files = &[("f1.txt", "LINT.OnChange(default)\nabdbbda\nadadd\n")];
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
         let res = FileSet::from_files(file_names, d.path());

@@ -17,4 +17,5 @@ patch = "0.7.0"
 regex = "1.9.5"
 
 [dev-dependencies]
+indoc = "2.0.4"
 tempfile = "3.8.0"
