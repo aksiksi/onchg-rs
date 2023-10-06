@@ -56,6 +56,35 @@ impl Parser {
     }
 }
 
+#[derive(Debug)]
+pub struct OnChangeViolation {
+    file: PathBuf,
+    block: OnChangeBlock,
+    target_file: PathBuf,
+    target_block_name: Option<String>,
+}
+
+impl ToString for OnChangeViolation {
+    fn to_string(&self) -> String {
+        if let Some(target_block_name) = &self.target_block_name {
+            format!(
+                r#"block "{}" in staged file "{}" has changed, but its OnChange target block "{}:{}" has not"#,
+                self.block.name(),
+                self.file.display(),
+                self.target_file.display(),
+                target_block_name
+            )
+        } else {
+            format!(
+                r#"block "{}" in staged file "{}" has changed, but its OnChange target file "{}" has not"#,
+                self.block.name(),
+                self.file.display(),
+                self.target_file.display()
+            )
+        }
+    }
+}
+
 impl Parser {
     /// Returns changed blocks in the file that are targetable.
     fn find_changed_blocks<'a>(
@@ -91,18 +120,31 @@ impl Parser {
         let path = path.as_ref();
 
         #[cfg(feature = "git")]
-        let ((staged_files, repo_path), staged_hunks) = {
+        let (staged_files, repo_path) = {
             let repo = git2::Repository::discover(path)?;
+            repo.get_staged_files(None)?
+        };
+        #[cfg(not(feature = "git"))]
+        let (staged_files, repo_path) = { crate::git::cli::Cli.get_staged_files(Some(path))? };
+        Self::from_files(staged_files.iter(), repo_path)
+    }
+
+    pub fn validate_git_repo(&self) -> Result<Vec<OnChangeViolation>> {
+        let path = self.root_path.as_path();
+
+        #[cfg(feature = "git")]
+        let ((staged_files, _), staged_hunks) = {
+            // We already have a correct Git path.
+            let repo = git2::Repository::open(path)?;
             (repo.get_staged_files(None)?, repo.get_staged_hunks(None)?)
         };
         #[cfg(not(feature = "git"))]
-        let ((staged_files, repo_path), staged_hunks) = {
+        let ((staged_files, _), staged_hunks) = {
             (
                 crate::git::cli::Cli.get_staged_files(Some(path))?,
                 crate::git::cli::Cli.get_staged_hunks(Some(path))?,
             )
         };
-        let parser = Self::from_files(staged_files.iter(), repo_path)?;
 
         let files_changed: HashSet<&Path> =
             HashSet::from_iter(staged_files.iter().map(|p| p.as_path()));
@@ -111,7 +153,7 @@ impl Parser {
 
         for (path, hunks) in &staged_hunks {
             let blocks_in_file: Vec<&OnChangeBlock> =
-                if let Some(blocks) = parser.on_change_blocks_in_file(path) {
+                if let Some(blocks) = self.on_change_blocks_in_file(path) {
                     blocks.collect()
                 } else {
                     continue;
@@ -125,6 +167,7 @@ impl Parser {
 
         // TODO(aksiksi): Collect all on change violations and return them as a list instead
         // of just returning the first one.
+        let mut violations: Vec<OnChangeViolation> = Vec::new();
 
         // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
         for (path, block) in blocks_changed {
@@ -132,28 +175,27 @@ impl Parser {
             for (on_change_file, on_change_block) in blocks_to_check {
                 if let Some(on_change_block) = on_change_block {
                     if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
-                        return Err(anyhow::anyhow!(
-                            r#"block "{}" in staged file "{}" has changed, but its OnChange target block "{}:{}" has not"#,
-                            block.name(),
-                            path.display(),
-                            on_change_file.display(),
-                            on_change_block,
-                        ));
+                        violations.push(OnChangeViolation {
+                            file: path.to_owned(),
+                            block: block.clone(),
+                            target_file: on_change_file.to_owned(),
+                            target_block_name: Some(on_change_block.to_string()),
+                        });
                     }
                 } else {
                     if !files_changed.contains(on_change_file) {
-                        return Err(anyhow::anyhow!(
-                            r#"block "{}" in staged file "{}" has changed, but its OnChange target file "{}" has not"#,
-                            block.name(),
-                            path.display(),
-                            on_change_file.display(),
-                        ));
+                        violations.push(OnChangeViolation {
+                            file: path.to_owned(),
+                            block: block.clone(),
+                            target_file: on_change_file.to_owned(),
+                            target_block_name: None,
+                        });
                     }
                 }
             }
         }
 
-        Ok(parser)
+        Ok(violations)
     }
 }
 
@@ -162,6 +204,11 @@ mod test {
     use crate::test_helpers::GitRepo;
 
     use super::*;
+
+    fn parse_and_validate(path: &Path, num_violations: usize) {
+        let p = Parser::from_git_repo(path).unwrap();
+        assert_eq!(p.validate_git_repo().unwrap().len(), num_violations);
+    }
 
     #[test]
     fn test_from_git_repo() {
@@ -176,26 +223,23 @@ mod test {
         let d = GitRepo::from_files(files);
 
         // Delete one line from f1.txt and stage it.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f1.txt",
             "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
-        );
-        d.add_all_files();
+        )]);
         // This should fail because f1.txt has changed but f2.txt has not.
-        assert!(Parser::from_git_repo(d.path()).is_err());
+        parse_and_validate(d.path(), 1);
 
         // Now stage the other file and ensure the parser succeeds.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f2.txt",
             "OnChange(default)\nadadd\nThenChange(f1.txt:default)\n",
-        );
-        d.add_all_files();
-        Parser::from_git_repo(d.path()).unwrap();
+        )]);
+        parse_and_validate(d.path(), 0);
 
         // Now stage f3 and ensure the parser succeeds.
-        d.write_file("f3.txt", "OnChange(this)\nabcde\nThenChange(f1.txt)\n");
-        d.add_all_files();
-        Parser::from_git_repo(d.path()).unwrap();
+        d.write_and_add_files(&[("f3.txt", "OnChange(this)\nabcde\nThenChange(f1.txt)\n")]);
+        parse_and_validate(d.path(), 0);
     }
 
     #[test]
@@ -224,24 +268,24 @@ mod test {
 
         // Change and stage both abc/f1.txt and f2.txt.
         // This should fail because abc/f1.txt depends on abc/f2.txt, not f2.txt.
-        d.write_file(
-            "abc/f1.txt",
-            "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
-        );
-        d.write_file(
-            "f2.txt",
-            "OnChange(default)\nadadd\nThenChange(abc/f1.txt:default)\n",
-        );
-        d.add_all_files();
-        assert!(Parser::from_git_repo(d.path()).is_err());
+        d.write_and_add_files(&[
+            (
+                "abc/f1.txt",
+                "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n",
+            ),
+            (
+                "f2.txt",
+                "OnChange(default)\nadadd\nThenChange(abc/f1.txt:default)\n",
+            ),
+        ]);
+        parse_and_validate(d.path(), 1);
 
         // Now change and stage abc/f2.txt.
-        d.write_file(
+        d.write_and_add_files(&[(
             "abc/f2.txt",
             "OnChange(default)\nabc\nThenChange(f1.txt:default)\n",
-        );
-        d.add_all_files();
-        Parser::from_git_repo(d.path()).unwrap();
+        )]);
+        parse_and_validate(d.path(), 0);
     }
 
     #[test]
@@ -262,43 +306,39 @@ mod test {
         let d = GitRepo::from_files(files);
 
         // Delete one unrelated line from f1.txt and stage it.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f1.txt",
             "OnChange(default)\nabdbbda\nadadd\nThenChange(f2.txt:default)\n
                  OnChange()\nabdbbda\nadadd\nThenChange(f2.txt:other)\n",
-        );
-        d.add_all_files();
+        )]);
         // This should pass because no blocks in f1.txt have changed.
-        Parser::from_git_repo(d.path()).unwrap();
+        parse_and_validate(d.path(), 0);
 
         // Delete one line from the two blocks in f1.txt and stage it.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f1.txt",
             "OnChange(default)\nadadd\nThenChange(f2.txt:default)\n
                  OnChange()\nabdbbda\nThenChange(f2.txt:other)\n",
-        );
-        d.add_all_files();
+        )]);
         // This should fail because f1.txt has changed but f2.txt has not.
-        assert!(Parser::from_git_repo(d.path()).is_err());
+        parse_and_validate(d.path(), 2);
 
         // Now change the first block in the other file. The first block in f1 will
         // pass, but second will not.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f2.txt",
             "OnChange(default)\nabba\nThenChange(f1.txt:default)
                  OnChange(other)\nThenChange(f1.txt:default)\n",
-        );
-        d.add_all_files();
-        assert!(Parser::from_git_repo(d.path()).is_err());
+        )]);
+        parse_and_validate(d.path(), 1);
 
         // Now change the other block in f2 and ensure the parser succeeds.
-        d.write_file(
+        d.write_and_add_files(&[(
             "f2.txt",
             "OnChange(default)\nabba\nThenChange(f1.txt:default)
                  OnChange(other)\nabbba\nThenChange(f1.txt:default)\n",
-        );
-        d.add_all_files();
-        Parser::from_git_repo(d.path()).unwrap();
+        )]);
+        parse_and_validate(d.path(), 0);
     }
 
     #[test]
@@ -320,29 +360,28 @@ mod test {
         ];
         let d = GitRepo::from_files(files);
 
-        // Add a line to f3 and f4 and stage them.
-        d.write_file(
+        // Add a line to f3 and stage it.
+        d.write_and_add_files(&[(
             "f3.txt",
             "OnChange()\nhello,there!\nThenChange(f1.txt:default, f2.txt:potato, f4.txt:something)\n",
-        );
-        d.add_all_files();
-        // This should fail because f3.txt has changed but f1, f2, and f4 have not.
-        assert!(Parser::from_git_repo(d.path()).is_err());
+        )]);
+        parse_and_validate(d.path(), 3);
 
         // Now stage the other files and ensure the parser succeeds.
-        d.write_file(
-            "f1.txt",
-            "OnChange(default)\nadadd\nThenChange(f2.txt:potato)\n",
-        );
-        d.write_file(
-            "f2.txt",
-            "OnChange(potato)\nadadd\nThenChange(f1.txt:default)\n",
-        );
-        d.write_file(
-            "f4.txt",
-            "OnChange(something)\nnewlinehere\n\nThenChange(f1.txt:default, f2.txt:potato)\n",
-        );
-        d.add_all_files();
-        Parser::from_git_repo(d.path()).unwrap();
+        d.write_and_add_files(&[
+            (
+                "f1.txt",
+                "OnChange(default)\nadadd\nThenChange(f2.txt:potato)\n",
+            ),
+            (
+                "f2.txt",
+                "OnChange(potato)\nadadd\nThenChange(f1.txt:default)\n",
+            ),
+            (
+                "f4.txt",
+                "OnChange(something)\nnewlinehere\n\nThenChange(f1.txt:default, f2.txt:potato)\n",
+            ),
+        ]);
+        parse_and_validate(d.path(), 0);
     }
 }

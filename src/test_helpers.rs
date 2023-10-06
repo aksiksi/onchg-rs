@@ -81,7 +81,10 @@ impl GitRepo {
         self.0.write_file_raw(path, content)
     }
 
-    pub fn add_all_files(&self) {
+    pub fn write_and_add_files<P: AsRef<Path>>(&self, files: &[(P, &str)]) {
+        for (path, content) in files {
+            self.write_file(path, content);
+        }
         self.add_files::<&str>(None)
     }
 

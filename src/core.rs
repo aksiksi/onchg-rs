@@ -29,13 +29,13 @@ thread_local! {
     static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*ThenChange\((.*)\).*$").unwrap());
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ThenChangeTarget {
     block: String,
     file: Option<PathBuf>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ThenChange {
     Unset,
     NoTarget,
@@ -45,7 +45,7 @@ pub enum ThenChange {
     BlockTarget(Vec<ThenChangeTarget>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OnChangeBlock {
     // The name would be None for an untargetable block.
     name: Option<String>,

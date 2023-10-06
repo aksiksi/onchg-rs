@@ -27,7 +27,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    let parser = match cli.mode {
+    let parser = match &cli.mode {
         Mode::Directory { path } => Parser::from_directory(path),
         Mode::Repo { path } => Parser::from_git_repo(path),
     };
@@ -35,19 +35,43 @@ fn main() {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
-
     let parser = parser.unwrap();
+
     let mut files = parser.files();
     files.sort();
 
     println!("Root path: {}\n", parser.root_path().display());
 
     if files.len() != 0 {
-        println!("Checked:");
+        println!("Files checked:");
         for f in files {
             println!("  * {}", f.display());
         }
     } else {
         println!("No files to check");
+        return;
+    }
+
+    println!();
+
+    match &cli.mode {
+        Mode::Repo { .. } => {
+            let violations = parser.validate_git_repo();
+            if let Err(e) = &violations {
+                eprintln!("Failed to validate Git repo state: {}", e);
+            }
+            let violations = violations.unwrap();
+            if violations.len() == 0 {
+                println!("OK.");
+                return;
+            } else {
+                println!("Violations:");
+            }
+            for v in violations {
+                println!("  * {}", v.to_string());
+            }
+            std::process::exit(1);
+        }
+        _ => (),
     }
 }
