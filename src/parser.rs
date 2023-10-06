@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
@@ -8,7 +8,52 @@ use crate::git::{Hunk, Repo};
 
 #[derive(Debug)]
 pub struct Parser {
+    root_path: PathBuf,
     file_set: FileSet,
+}
+
+impl Parser {
+    /// Builds a parser from the given set of files, as well as any files they depend
+    /// on, recursively.
+    ///
+    /// TODO(aksiksi): Respect .gitignore and .ignore files via [[ignore]].
+    pub fn from_files<P: AsRef<Path>>(
+        paths: impl Iterator<Item = P>,
+        root_path: PathBuf,
+    ) -> Result<Self> {
+        let file_set = FileSet::from_files(paths, &root_path)?;
+        Ok(Self {
+            file_set,
+            root_path,
+        })
+    }
+
+    /// Recursively walks through all files in the given path and parses them.
+    ///
+    /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
+    pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let file_set = FileSet::from_directory(&path)?;
+        Ok(Self {
+            file_set,
+            root_path: path.as_ref().to_owned(),
+        })
+    }
+
+    pub fn files(&self) -> Vec<&Path> {
+        self.file_set.files()
+    }
+
+    /// Returns a iterator over all of the blocks in a specific file.
+    fn on_change_blocks_in_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Option<impl Iterator<Item = &OnChangeBlock>> {
+        self.file_set.on_change_blocks_in_file(path)
+    }
+
+    pub fn root_path(&self) -> &Path {
+        &self.root_path
+    }
 }
 
 impl Parser {
@@ -57,8 +102,8 @@ impl Parser {
                 crate::git::cli::Cli.get_staged_hunks(Some(path))?,
             )
         };
+        let parser = Self::from_files(staged_files.iter(), repo_path)?;
 
-        let file_set = FileSet::from_files(staged_files.iter(), &repo_path)?;
         let files_changed: HashSet<&Path> =
             HashSet::from_iter(staged_files.iter().map(|p| p.as_path()));
         let mut blocks_changed: Vec<(&Path, &OnChangeBlock)> = Vec::new();
@@ -66,7 +111,7 @@ impl Parser {
 
         for (path, hunks) in &staged_hunks {
             let blocks_in_file: Vec<&OnChangeBlock> =
-                if let Some(blocks) = file_set.on_change_blocks_in_file(path) {
+                if let Some(blocks) = parser.on_change_blocks_in_file(path) {
                     blocks.collect()
                 } else {
                     continue;
@@ -108,19 +153,7 @@ impl Parser {
             }
         }
 
-        Ok(Self { file_set })
-    }
-
-    /// Recursively walks through all files in the given path and parses them.
-    ///
-    /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
-    pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file_set = FileSet::from_directory(path)?;
-        Ok(Self { file_set })
-    }
-
-    pub fn files(&self) -> Vec<&Path> {
-        self.file_set.files()
+        Ok(parser)
     }
 }
 

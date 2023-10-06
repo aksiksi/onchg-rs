@@ -40,10 +40,14 @@ fn main() {
     let mut files = parser.files();
     files.sort();
 
+    println!("Root path: {}\n", parser.root_path().display());
+
     if files.len() != 0 {
-        println!("Checked:\n");
+        println!("Checked:");
         for f in files {
             println!("  * {}", f.display());
         }
+    } else {
+        println!("No files to check");
     }
 }
