@@ -13,33 +13,37 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.event.repository.name }}
+  CARGO_TERM_COLOR: always
 
 jobs:
   linux-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install libgit2
         run:  sudo apt-get install -y libgit2-dev
       - name: Setup dummy Git identity
         run: git config --global user.name "dummy" && git config --global user.email "dummy@example.com"
       - name: Run tests
         run: make ci
+
   linux-coverage:
     runs-on: ubuntu-latest
     needs: linux-test
-    container:
-      image: xd009642/tarpaulin:latest
-      options: --security-opt seccomp=unconfined
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup dummy Git identity
         run: git config --global user.name "dummy" && git config --global user.email "dummy@example.com"
       - name: Install libgit2
-        run: apt-get update -y && apt-get install -y libgit2-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libgit2-dev
+      - name: Install Rust
+        run: rustup update stable
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run tests with coverage
-        run: cargo tarpaulin --verbose
+        run: make coverage
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v3
         with:
           fail_ci_if_error: true
+          files: lcov.info
