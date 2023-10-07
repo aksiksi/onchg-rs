@@ -43,7 +43,7 @@ fn main() {
             println!("  * {}", f.display());
         }
     } else {
-        println!("No files to check");
+        println!("No staged files to check");
         return;
     }
 

@@ -59,6 +59,10 @@ impl OnChangeBlock {
         self.name.as_deref().unwrap_or("<unnamed>")
     }
 
+    pub fn is_targetable(&self) -> bool {
+        self.name.is_some()
+    }
+
     pub fn start_line(&self) -> u32 {
         self.start_line
     }
@@ -127,10 +131,13 @@ impl OnChangeBlock {
 
     /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
     /// If a target has no path set, it will be replaced with the provided file path.
-    pub fn get_then_change_targets_as_keys<'a>(
+    pub fn get_then_change_targets_as_keys<'a, 'b>(
         &'a self,
-        default_path: &'a Path,
-    ) -> Box<dyn Iterator<Item = (&Path, Option<&str>)> + 'a> {
+        default_path: &'b Path,
+    ) -> Box<dyn Iterator<Item = (&'b Path, Option<&'a str>)> + 'b>
+    where
+        'a: 'b,
+    {
         match &self.then_change {
             ThenChange::NoTarget | ThenChange::Unset => Box::new(std::iter::empty()),
             ThenChange::FileTarget(path) => Box::new(std::iter::once((path.as_path(), None))),
@@ -582,6 +589,17 @@ impl FileSet {
         path: P,
     ) -> Option<impl Iterator<Item = &OnChangeBlock>> {
         self.files.get(path.as_ref()).map(|file| file.blocks.iter())
+    }
+
+    /// Returns a iterator over all of the blocks in a specific file.
+    pub fn get_block_in_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+        block_name: &str,
+    ) -> Option<&OnChangeBlock> {
+        self.files
+            .get(path.as_ref())
+            .and_then(|f| f.blocks.iter().find(|b| b.name() == block_name))
     }
 
     pub fn files(&self) -> Vec<&Path> {

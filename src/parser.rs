@@ -57,36 +57,39 @@ impl Parser {
 }
 
 #[derive(Debug)]
-pub struct OnChangeViolation {
+pub struct OnChangeViolation<'a> {
     file: PathBuf,
-    block: OnChangeBlock,
+    block: &'a OnChangeBlock,
     target_file: PathBuf,
-    target_block_name: Option<String>,
+    target_block: Option<&'a OnChangeBlock>,
 }
 
-impl ToString for OnChangeViolation {
+impl<'a> ToString for OnChangeViolation<'a> {
     fn to_string(&self) -> String {
-        if let Some(target_block_name) = &self.target_block_name {
+        if let Some(target_block) = self.target_block {
             format!(
-                r#"block "{}" in staged file "{}" has changed, but its OnChange target block "{}:{}" has not"#,
+                r#"block "{}" in staged file at "{}:{}" has changed, but its OnChange target block "{}" at "{}:{}" has not"#,
                 self.block.name(),
                 self.file.display(),
+                self.block.start_line(),
+                target_block.name(),
                 self.target_file.display(),
-                target_block_name
+                target_block.start_line(),
             )
         } else {
             format!(
-                r#"block "{}" in staged file "{}" has changed, but its OnChange target file "{}" has not"#,
+                r#"block "{}" in staged file "{}:{}" has changed, but its OnChange target file "{}" has not"#,
                 self.block.name(),
                 self.file.display(),
-                self.target_file.display()
+                self.block.start_line(),
+                self.target_file.display(),
             )
         }
     }
 }
 
 impl Parser {
-    /// Returns changed blocks in the file that are targetable.
+    /// Returns all changed blocks in the file.
     fn find_changed_blocks<'a>(
         hunks: &[Hunk],
         blocks: &[&'a OnChangeBlock],
@@ -129,7 +132,52 @@ impl Parser {
         Self::from_files(staged_files.iter(), repo_path)
     }
 
-    pub fn validate_git_repo(&self) -> Result<Vec<OnChangeViolation>> {
+    // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
+    // This will happen _recursively_ for all ThenChange targets. If a violation is detected, it will
+    // be returned.
+    fn validate_changed_files_and_blocks<'a, 'b>(
+        &'a self,
+        files_changed: HashSet<&Path>,
+        blocks_changed: Vec<(&'b Path, &'a OnChangeBlock)>,
+        targetable_blocks_changed: HashSet<(&Path, &'a str)>,
+    ) -> Vec<OnChangeViolation<'a>>
+    where
+        'a: 'b,
+    {
+        let mut violations = Vec::new();
+
+        // Treat the blocks_changed list as a stack. This allows us to run a DFS on ThenChange targets.
+        for (path, block) in blocks_changed {
+            let blocks_to_check = block.get_then_change_targets_as_keys(path);
+            for (on_change_file, on_change_block) in blocks_to_check {
+                if let Some(on_change_block) = on_change_block {
+                    if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
+                        let target_block = self
+                            .file_set
+                            .get_block_in_file(on_change_file, on_change_block)
+                            .expect("block should exist");
+                        violations.push(OnChangeViolation {
+                            file: path.to_owned(),
+                            block,
+                            target_file: on_change_file.to_owned(),
+                            target_block: Some(target_block),
+                        });
+                    }
+                } else if !files_changed.contains(on_change_file) {
+                    violations.push(OnChangeViolation {
+                        file: path.to_owned(),
+                        block,
+                        target_file: on_change_file.to_owned(),
+                        target_block: None,
+                    });
+                }
+            }
+        }
+
+        violations
+    }
+
+    pub fn validate_git_repo(&self) -> Result<Vec<OnChangeViolation<'_>>> {
         let path = self.root_path.as_path();
 
         #[cfg(feature = "git")]
@@ -161,37 +209,17 @@ impl Parser {
             let changed_blocks = Self::find_changed_blocks(hunks, &blocks_in_file);
             for block in changed_blocks {
                 blocks_changed.push((&path, block));
-                targetable_blocks_changed.insert((&path, block.name()));
-            }
-        }
-
-        // TODO(aksiksi): Collect all on change violations and return them as a list instead
-        // of just returning the first one.
-        let mut violations: Vec<OnChangeViolation> = Vec::new();
-
-        // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
-        for (path, block) in blocks_changed {
-            let blocks_to_check = block.get_then_change_targets_as_keys(path);
-            for (on_change_file, on_change_block) in blocks_to_check {
-                if let Some(on_change_block) = on_change_block {
-                    if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
-                        violations.push(OnChangeViolation {
-                            file: path.to_owned(),
-                            block: block.clone(),
-                            target_file: on_change_file.to_owned(),
-                            target_block_name: Some(on_change_block.to_string()),
-                        });
-                    }
-                } else if !files_changed.contains(on_change_file) {
-                    violations.push(OnChangeViolation {
-                        file: path.to_owned(),
-                        block: block.clone(),
-                        target_file: on_change_file.to_owned(),
-                        target_block_name: None,
-                    });
+                if block.is_targetable() {
+                    targetable_blocks_changed.insert((&path, block.name()));
                 }
             }
         }
+
+        let violations = self.validate_changed_files_and_blocks(
+            files_changed,
+            blocks_changed,
+            targetable_blocks_changed,
+        );
 
         Ok(violations)
     }
