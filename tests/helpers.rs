@@ -1,7 +1,10 @@
-use std::{io::Write, path::PathBuf};
+use std::io::Write;
+use std::path::PathBuf;
 
 use base64::Engine;
 use rand::{RngCore, SeedableRng};
+
+use onchg::{OnChangeBlock, ThenChange, ThenChangeTarget};
 
 pub struct RandomOnChangeTree {
     root: PathBuf,
@@ -13,7 +16,7 @@ pub struct RandomOnChangeTree {
     //
     // In fact, we could probably just build OnChangeBlocks and serialize them to
     // strings when building blocks in a file.
-    blocks: Vec<(PathBuf, String)>,
+    blocks: Vec<(PathBuf, OnChangeBlock)>,
     max_directory_depth: usize,
     max_blocks_per_file: usize,
     max_lines_per_block: usize,
@@ -68,6 +71,12 @@ impl RandomOnChangeTree {
         self.rand_in_range(2) == 0
     }
 
+    // Lifetimes are tricky with this one...
+    #[allow(unused)]
+    fn rand_elem<'a, T>(&mut self, elems: &'a [T]) -> &'a T {
+        &elems[self.rand_in_range(elems.len())]
+    }
+
     fn create_directory(&mut self) {
         let mut depth = self.rand_in_range(self.max_directory_depth + 1);
 
@@ -114,11 +123,46 @@ impl RandomOnChangeTree {
         }
     }
 
-    fn create_blocks(&mut self, f: &mut std::fs::File) -> Vec<String> {
-        let mut blocks: Vec<String> = Vec::new();
-        let blocks_len = self.blocks.len();
+    fn targetable_blocks(&self) -> Vec<(&PathBuf, &OnChangeBlock)> {
+        self.blocks
+            .iter()
+            .filter_map(|(p, b)| {
+                if b.is_targetable() {
+                    Some((p, b))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn block_to_strings(block: &OnChangeBlock) -> (String, String) {
+        let on_change_string = format!("LINT.OnChange({})\n", block.name_raw().unwrap_or(""));
+
+        let then_change_target: String = match block.then_change() {
+            ThenChange::FileTarget(f) => format!("{}", f.display()),
+            ThenChange::BlockTarget(targets) => targets
+                .into_iter()
+                .map(|t| {
+                    let target_file = t.file.as_ref().map(|p| p.to_str().unwrap()).unwrap_or("");
+                    let target_block = t.block.as_str();
+                    format!("{}:{}", target_file, target_block)
+                })
+                .collect::<Vec<String>>()
+                .join(","),
+            ThenChange::NoTarget => "".to_string(),
+            ThenChange::Unset => unreachable!(),
+        };
+        let then_change_string = format!("LINT.ThenChange({})\n", then_change_target);
+
+        (on_change_string, then_change_string)
+    }
+
+    fn create_blocks(&mut self, f: &mut std::fs::File) -> Vec<OnChangeBlock> {
+        let mut blocks: Vec<OnChangeBlock> = Vec::new();
 
         let num_blocks = self.rand_in_range(self.max_blocks_per_file);
+        let mut line_num = 0;
         for _ in 0..num_blocks {
             let num_lines = self.rand_in_range(self.max_lines_per_block);
             let block_name = if self.rand_bool() {
@@ -133,52 +177,80 @@ impl RandomOnChangeTree {
             let chosen = self.rand_bool();
             if chosen && self.blocks.len() > 0 {
                 // Target an existing file + block.
-                let r = self.rand_in_range(blocks_len);
-                let (p, b) = self.blocks[r].clone();
+                let (p, b) = {
+                    let target_blocks = self.targetable_blocks();
+                    let r = self.rand_in_range(target_blocks.len());
+                    let b = self.targetable_blocks()[r].clone();
+                    (b.0.to_owned(), b.1.to_owned())
+                };
                 then_change_file = Some(p);
                 then_change_block = if self.rand_in_range(100) < 25 {
                     // 25% chance to only use a file target.
                     None
                 } else {
-                    Some(b)
+                    Some(b.name().to_string())
                 };
-            } else if chosen && blocks.len() > 0 {
-                // 50% to target existing in-file block (assuming we have one!).
-                let n = self.rand_in_range(blocks.len());
-                then_change_block = Some(blocks[n].clone());
+            } else if !chosen {
+                // 50% to target existing in-file block (assuming we have one that is targetable!).
+                for b in &blocks {
+                    if b.is_targetable() {
+                        then_change_block = Some(b.name().to_string())
+                    }
+                }
             }
 
-            let block_name_str = block_name.as_deref().unwrap_or("");
-            let then_change_file = then_change_file
-                .as_ref()
-                .map(|p| p.to_str().unwrap())
-                .unwrap_or("");
-            let then_change_block = then_change_block.as_deref().unwrap_or("");
-            let then_change_target = if then_change_file != "" || then_change_block != "" {
-                if then_change_block != "" {
-                    format!("{}:{}", then_change_file, then_change_block)
-                } else {
-                    format!("{}", then_change_file)
+            let start_line = line_num as u32;
+            let end_line = (line_num + num_lines) as u32;
+            let block_target = match (then_change_file, then_change_block) {
+                (then_change_file, Some(then_change_block)) => {
+                    let v = vec![ThenChangeTarget {
+                        file: then_change_file,
+                        block: then_change_block,
+                    }];
+                    ThenChange::BlockTarget(v)
                 }
-            } else {
-                // This can happen if we're generating the first block ever.
-                String::new()
+                (Some(then_change_file), None) => ThenChange::FileTarget(then_change_file),
+                (None, None) => ThenChange::NoTarget,
             };
+            let block = OnChangeBlock::new(block_name, start_line, end_line, block_target);
 
-            f.write(format!("LINT.OnChange({})\n", block_name_str).as_bytes())
-                .unwrap();
+            let (on_change_string, then_change_string) = Self::block_to_strings(&block);
+
+            f.write(on_change_string.as_bytes()).unwrap();
             for _ in 0..num_lines {
                 // Write a bunch of empty lines.
                 f.write("\n".as_bytes()).unwrap();
             }
-            f.write(format!("LINT.ThenChange({})\n", then_change_target,).as_bytes())
-                .unwrap();
+            f.write(then_change_string.as_bytes()).unwrap();
 
-            if let Some(block_name) = block_name {
-                blocks.push(block_name);
-            }
+            blocks.push(block);
+
+            line_num += num_lines + 1;
         }
 
         blocks
+    }
+
+    pub fn touch_random_block(&mut self) {
+        let n = self.rand_in_range(self.targetable_blocks().len());
+        let (p, b) = self.targetable_blocks()[n];
+        let start_line = b.start_line() as usize;
+
+        let mut f = std::fs::File::options().write(true).open(p).unwrap();
+
+        let s = std::fs::read_to_string(p).unwrap();
+        let mut lines: Vec<&str> = s.lines().collect();
+
+        let mut insert_after = None;
+        for (n, _) in lines.iter().enumerate() {
+            if n + 1 == start_line {
+                insert_after = Some(n);
+            }
+        }
+        if let Some(insert_after) = insert_after {
+            lines.insert(insert_after, "some change!");
+        }
+
+        f.write_all(lines.join("\n").as_bytes()).unwrap();
     }
 }

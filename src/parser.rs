@@ -279,7 +279,7 @@ mod test {
                         def __init__(self):
                             # LINT.OnChange(python)
                             self.v = 10
-                            # LINT.ThenChange(f1.html:other-html)
+                            # LINT.ThenChange(f1.html)
 
                     if __name__ == "__main__":
                         print(A())

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser as CliParser;
 
-use onchg::parser::Parser;
+use onchg::Parser;
 
 #[derive(clap::Parser, Clone, Debug)]
 enum Mode {
@@ -38,7 +38,7 @@ fn main() {
     println!("Root path: {}\n", parser.root_path().display());
 
     if files.len() != 0 {
-        println!("Files checked:");
+        println!("Files parsed:");
         for f in files {
             println!("  * {}", f.display());
         }

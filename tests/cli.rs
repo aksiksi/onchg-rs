@@ -2,6 +2,7 @@
 use std::process::Command;
 
 use assert_cmd::prelude::*;
+use predicates::prelude::*;
 
 mod helpers;
 
@@ -15,7 +16,7 @@ fn test_directory() {
     let s = std::time::Instant::now();
 
     // Setup some fake directories and files.
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 10, 100, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 100, 100);
     f.init(20, 150);
 
     eprintln!("Initialized random directory tree in {:?}", s.elapsed());
@@ -30,4 +31,41 @@ fn test_directory() {
         .success();
 
     eprintln!("Parsed tree in {:?}", s.elapsed())
+}
+
+#[test]
+fn test_git_repo() {
+    let d = GitRepo::new();
+
+    let s = std::time::Instant::now();
+
+    // Setup some fake directories and files.
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 100, 100);
+    f.init(20, 150);
+
+    d.add_all_files();
+    d.commit(None);
+
+    eprintln!(
+        "Initialized random directory tree and repo in {:?}",
+        s.elapsed()
+    );
+
+    // Touch a few random blocks and stage them.
+    for _ in 0..5 {
+        f.touch_random_block();
+    }
+    d.add_all_files();
+
+    let s = std::time::Instant::now();
+
+    Command::cargo_bin("onchg")
+        .unwrap()
+        .args(&["repo", "."])
+        .current_dir(d.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("but its OnChange target file"));
+
+    eprintln!("Parsed & validated staged files in {:?}", s.elapsed())
 }

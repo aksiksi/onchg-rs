@@ -99,18 +99,18 @@ impl Repo for Repository {
                 let (start_line, end_line) = (this_hunk.start_line, this_hunk.end_line);
 
                 if !hunk_map.contains_key(&file_path) {
-                    let mut m = HashMap::new();
-                    m.insert((start_line, end_line), this_hunk);
-                    hunk_map.insert(file_path.clone(), m);
+                    hunk_map.insert(file_path.clone(), HashMap::new());
+                }
+                let file_map = hunk_map.get_mut(&file_path).unwrap();
+                if !file_map.contains_key(&(start_line, end_line)) {
+                    file_map.insert((start_line, end_line), this_hunk);
                 }
 
-                let hunk = hunk_map
-                    .get_mut(&file_path)
-                    .unwrap()
+                file_map
                     .get_mut(&(start_line, end_line))
-                    .unwrap();
-
-                hunk.lines.push(line.into());
+                    .unwrap()
+                    .lines
+                    .push(line.into());
 
                 true
             }),

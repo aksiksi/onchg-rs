@@ -31,8 +31,8 @@ thread_local! {
 
 #[derive(Clone, Debug)]
 pub struct ThenChangeTarget {
-    block: String,
-    file: Option<PathBuf>,
+    pub block: String,
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +59,10 @@ impl OnChangeBlock {
         self.name.as_deref().unwrap_or("<unnamed>")
     }
 
+    pub fn name_raw(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     pub fn is_targetable(&self) -> bool {
         self.name.is_some()
     }
@@ -69,6 +73,24 @@ impl OnChangeBlock {
 
     pub fn end_line(&self) -> u32 {
         self.end_line
+    }
+
+    pub fn then_change(&self) -> &ThenChange {
+        &self.then_change
+    }
+
+    pub fn new(
+        name: Option<String>,
+        start_line: u32,
+        end_line: u32,
+        then_change: ThenChange,
+    ) -> Self {
+        Self {
+            name,
+            start_line,
+            end_line,
+            then_change,
+        }
     }
 
     pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
@@ -242,6 +264,7 @@ impl File {
             // Try to parse as just a file target.
             let file_path =
                 Self::parse_then_target_file_path(line_num, path, root_path, then_change_target)?;
+            files_to_parse.insert(file_path.clone());
             return Ok(ThenChange::FileTarget(file_path));
         }
 
@@ -676,6 +699,31 @@ mod test {
         let d = TestDir::from_files(files);
         let file_names = files.iter().map(|f| f.0);
         FileSet::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_from_files_file_target_parsed() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange(this)\n
+                 LINT.ThenChange(f1.txt)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        // Only provide f3.txt.
+        FileSet::from_files(std::iter::once("f3.txt"), d.path()).unwrap();
     }
 
     #[test]

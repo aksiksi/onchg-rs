@@ -106,6 +106,10 @@ impl GitRepo {
         assert!(output.status.success());
     }
 
+    pub fn add_all_files(&self) {
+        self.add_files::<&str>(None);
+    }
+
     pub fn commit(&self, msg: Option<&str>) {
         let output = std::process::Command::new("git")
             .current_dir(self.path())
