@@ -16,7 +16,7 @@ fn test_directory() {
 
     // Setup some fake directories and files.
     let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 10, 100, 100);
-    f.init(10, 100);
+    f.init(20, 150);
 
     eprintln!("Initialized random directory tree in {:?}", s.elapsed());
 

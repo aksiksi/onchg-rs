@@ -8,6 +8,11 @@ pub struct RandomOnChangeTree {
     rng: rand::rngs::StdRng,
     b64: base64::engine::GeneralPurpose,
     directories: Vec<PathBuf>,
+    // TODO(aksiksi): Keep track of block locations and targets to allow tests
+    // to modify specific blocks for Git-based tests and benches.
+    //
+    // In fact, we could probably just build OnChangeBlocks and serialize them to
+    // strings when building blocks in a file.
     blocks: Vec<(PathBuf, String)>,
     max_directory_depth: usize,
     max_blocks_per_file: usize,
@@ -64,17 +69,29 @@ impl RandomOnChangeTree {
     }
 
     fn create_directory(&mut self) {
-        let depth = self.rand_in_range(self.max_directory_depth + 1);
+        let mut depth = self.rand_in_range(self.max_directory_depth + 1);
+
+        // If we have existing directories, we should randomly try to choose one as a parent.
+        let mut parent: Option<PathBuf> = None;
+        if self.directories.len() > 0 && self.rand_bool() {
+            // This attempt will fail if the parent's depth is equal to the max depth.
+            // In this case, we simply fallback to the normal flow.
+            let n = self.rand_in_range(self.directories.len());
+            let p = &self.directories[n];
+            let parent_depth = p.components().collect::<Vec<_>>().len();
+            if parent_depth < self.max_directory_depth {
+                depth = self.max_directory_depth - parent_depth;
+                parent = Some(p.to_owned());
+            }
+        }
+
         let parts = (0..depth)
             .into_iter()
             .map(|_| self.rand_string())
             .collect::<Vec<String>>();
-
-        // If we have a set of directories, we should sometimes choose one as a parent.
         let mut p = PathBuf::from_iter(parts.into_iter());
-        if self.rand_bool() && self.directories.len() > 0 {
-            let n = self.rand_in_range(self.directories.len());
-            let parent = &self.directories[n];
+
+        if let Some(parent) = parent {
             p = parent.join(p);
         } else {
             p = self.root.join(p);
@@ -87,7 +104,7 @@ impl RandomOnChangeTree {
 
     fn create_file(&mut self) {
         let n = self.rand_in_range(self.directories.len());
-        let file_name = self.rand_string();
+        let file_name = format!("{}.file", self.rand_string());
         let d = &self.directories[n];
         let path = d.join(file_name);
         let mut f = std::fs::File::create(&path).unwrap();
