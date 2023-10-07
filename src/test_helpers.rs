@@ -1,3 +1,5 @@
+#![doc(hidden)]
+
 use std::io::Write;
 use std::path::Path;
 

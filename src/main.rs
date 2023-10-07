@@ -1,13 +1,8 @@
 use std::path::PathBuf;
 
-mod core;
-mod git;
-mod parser;
-#[cfg(test)]
-mod test_helpers;
-
 use clap::Parser as CliParser;
-use parser::Parser;
+
+use onchg::parser::Parser;
 
 #[derive(clap::Parser, Clone, Debug)]
 enum Mode {
