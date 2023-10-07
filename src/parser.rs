@@ -58,7 +58,6 @@ impl Parser {
 
 #[derive(Debug)]
 pub struct OnChangeViolation<'a> {
-    file: PathBuf,
     block: &'a OnChangeBlock,
     target_file: PathBuf,
     target_block: Option<&'a OnChangeBlock>,
@@ -70,7 +69,7 @@ impl<'a> ToString for OnChangeViolation<'a> {
             format!(
                 r#"block "{}" in staged file at "{}:{}" has changed, but its OnChange target block "{}" at "{}:{}" has not"#,
                 self.block.name(),
-                self.file.display(),
+                self.block.file().display(),
                 self.block.start_line(),
                 target_block.name(),
                 self.target_file.display(),
@@ -80,7 +79,7 @@ impl<'a> ToString for OnChangeViolation<'a> {
             format!(
                 r#"block "{}" in staged file "{}:{}" has changed, but its OnChange target file "{}" has not"#,
                 self.block.name(),
-                self.file.display(),
+                self.block.file().display(),
                 self.block.start_line(),
                 self.target_file.display(),
             )
@@ -138,7 +137,7 @@ impl Parser {
     fn validate_changed_files_and_blocks<'a, 'b>(
         &'a self,
         files_changed: HashSet<&Path>,
-        blocks_changed: Vec<(&'b Path, &'a OnChangeBlock)>,
+        blocks_changed: Vec<&'a OnChangeBlock>,
         targetable_blocks_changed: HashSet<(&Path, &'a str)>,
     ) -> Vec<OnChangeViolation<'a>>
     where
@@ -147,8 +146,8 @@ impl Parser {
         let mut violations = Vec::new();
 
         // Treat the blocks_changed list as a stack. This allows us to run a DFS on ThenChange targets.
-        for (path, block) in blocks_changed {
-            let blocks_to_check = block.get_then_change_targets_as_keys(path);
+        for block in blocks_changed {
+            let blocks_to_check = block.get_then_change_targets_as_keys();
             for (on_change_file, on_change_block) in blocks_to_check {
                 if let Some(on_change_block) = on_change_block {
                     if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
@@ -157,7 +156,6 @@ impl Parser {
                             .get_block_in_file(on_change_file, on_change_block)
                             .expect("block should exist");
                         violations.push(OnChangeViolation {
-                            file: path.to_owned(),
                             block,
                             target_file: on_change_file.to_owned(),
                             target_block: Some(target_block),
@@ -165,7 +163,6 @@ impl Parser {
                     }
                 } else if !files_changed.contains(on_change_file) {
                     violations.push(OnChangeViolation {
-                        file: path.to_owned(),
                         block,
                         target_file: on_change_file.to_owned(),
                         target_block: None,
@@ -196,7 +193,7 @@ impl Parser {
 
         let files_changed: HashSet<&Path> =
             HashSet::from_iter(staged_files.iter().map(|p| p.as_path()));
-        let mut blocks_changed: Vec<(&Path, &OnChangeBlock)> = Vec::new();
+        let mut blocks_changed: Vec<&OnChangeBlock> = Vec::new();
         let mut targetable_blocks_changed: HashSet<(&Path, &str)> = HashSet::new();
 
         for (path, hunks) in &staged_hunks {
@@ -208,7 +205,7 @@ impl Parser {
                 };
             let changed_blocks = Self::find_changed_blocks(hunks, &blocks_in_file);
             for block in changed_blocks {
-                blocks_changed.push((&path, block));
+                blocks_changed.push(block);
                 if block.is_targetable() {
                     targetable_blocks_changed.insert((&path, block.name()));
                 }

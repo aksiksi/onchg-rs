@@ -11,11 +11,6 @@ pub struct RandomOnChangeTree {
     rng: rand::rngs::StdRng,
     b64: base64::engine::GeneralPurpose,
     directories: Vec<PathBuf>,
-    // TODO(aksiksi): Keep track of block locations and targets to allow tests
-    // to modify specific blocks for Git-based tests and benches.
-    //
-    // In fact, we could probably just build OnChangeBlocks and serialize them to
-    // strings when building blocks in a file.
     blocks: Vec<(PathBuf, OnChangeBlock)>,
     max_directory_depth: usize,
     max_blocks_per_file: usize,
@@ -117,7 +112,7 @@ impl RandomOnChangeTree {
         let d = &self.directories[n];
         let path = d.join(file_name);
         let mut f = std::fs::File::create(&path).unwrap();
-        let blocks = self.create_blocks(&mut f);
+        let blocks = self.create_blocks(path.clone(), &mut f);
         for block in blocks {
             self.blocks.push((path.clone(), block));
         }
@@ -158,7 +153,7 @@ impl RandomOnChangeTree {
         (on_change_string, then_change_string)
     }
 
-    fn create_blocks(&mut self, f: &mut std::fs::File) -> Vec<OnChangeBlock> {
+    fn create_blocks(&mut self, path: PathBuf, f: &mut std::fs::File) -> Vec<OnChangeBlock> {
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
 
         let num_blocks = self.rand_in_range(self.max_blocks_per_file);
@@ -212,7 +207,8 @@ impl RandomOnChangeTree {
                 (Some(then_change_file), None) => ThenChange::FileTarget(then_change_file),
                 (None, None) => ThenChange::NoTarget,
             };
-            let block = OnChangeBlock::new(block_name, start_line, end_line, block_target);
+            let block =
+                OnChangeBlock::new(path.clone(), block_name, start_line, end_line, block_target);
 
             let (on_change_string, then_change_string) = Self::block_to_strings(&block);
 

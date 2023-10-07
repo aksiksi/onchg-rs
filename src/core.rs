@@ -16,6 +16,7 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use anyhow::Result;
 use ignore::WalkBuilder;
@@ -47,6 +48,7 @@ pub enum ThenChange {
 
 #[derive(Clone, Debug)]
 pub struct OnChangeBlock {
+    file: Rc<PathBuf>,
     // The name would be None for an untargetable block.
     name: Option<String>,
     start_line: u32,
@@ -55,8 +57,28 @@ pub struct OnChangeBlock {
 }
 
 impl OnChangeBlock {
+    pub fn new(
+        file: PathBuf,
+        name: Option<String>,
+        start_line: u32,
+        end_line: u32,
+        then_change: ThenChange,
+    ) -> Self {
+        Self {
+            file: Rc::new(file),
+            name,
+            start_line,
+            end_line,
+            then_change,
+        }
+    }
+
     pub fn name(&self) -> &str {
         self.name.as_deref().unwrap_or("<unnamed>")
+    }
+
+    pub fn file(&self) -> &Path {
+        &self.file
     }
 
     pub fn name_raw(&self) -> Option<&str> {
@@ -77,20 +99,6 @@ impl OnChangeBlock {
 
     pub fn then_change(&self) -> &ThenChange {
         &self.then_change
-    }
-
-    pub fn new(
-        name: Option<String>,
-        start_line: u32,
-        end_line: u32,
-        then_change: ThenChange,
-    ) -> Self {
-        Self {
-            name,
-            start_line,
-            end_line,
-            then_change,
-        }
     }
 
     pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
@@ -153,20 +161,16 @@ impl OnChangeBlock {
 
     /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
     /// If a target has no path set, it will be replaced with the provided file path.
-    pub fn get_then_change_targets_as_keys<'a, 'b>(
+    pub fn get_then_change_targets_as_keys<'a>(
         &'a self,
-        default_path: &'b Path,
-    ) -> Box<dyn Iterator<Item = (&'b Path, Option<&'a str>)> + 'b>
-    where
-        'a: 'b,
-    {
+    ) -> Box<dyn Iterator<Item = (&Path, Option<&str>)> + 'a> {
         match &self.then_change {
             ThenChange::NoTarget | ThenChange::Unset => Box::new(std::iter::empty()),
             ThenChange::FileTarget(path) => Box::new(std::iter::once((path.as_path(), None))),
             ThenChange::BlockTarget(targets) => {
                 Box::new(targets.iter().map(move |t| match &t.file {
                     Some(path) => (path.as_path(), Some(t.block.as_str())),
-                    None => (default_path, Some(t.block.as_str())),
+                    None => (self.file.as_path(), Some(t.block.as_str())),
                 }))
             }
         }
@@ -305,7 +309,7 @@ impl File {
     }
 
     fn handle_on_change(
-        path: &Path,
+        file: Rc<PathBuf>,
         parsed: String,
         line_num: usize,
         block_name_to_start_line: &mut HashMap<String, usize>,
@@ -326,13 +330,14 @@ impl File {
                     block_name,
                     block_name_to_start_line[block_name],
                     line_num,
-                    path.display(),
+                    file.display(),
                 ));
             }
             block_name_to_start_line.insert(block_name.clone(), line_num);
         }
 
         block_stack.push(OnChangeBlock {
+            file,
             name: block_name,
             start_line: line_num as u32,
             end_line: 0,
@@ -365,17 +370,16 @@ impl File {
         Ok(block)
     }
 
-    fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
-        path: P,
-        root_path: Option<Q>,
+    fn parse<P: AsRef<Path>>(
+        path: Rc<PathBuf>,
+        root_path: Option<P>,
     ) -> Result<(Self, HashSet<PathBuf>)> {
-        let path = path.as_ref().canonicalize()?;
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
         // Set of files that need to be parsed based on OnChange targets seen in this file.
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
 
-        let f = std::fs::File::open(&path)?;
+        let f = std::fs::File::open(path.as_path())?;
         let reader = std::io::BufReader::new(f);
 
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
@@ -394,7 +398,7 @@ impl File {
             let line_num = line_num + 1;
             if let Some(parsed) = Self::try_parse_on_change_line(&line) {
                 Self::handle_on_change(
-                    &path,
+                    path.clone(),
                     parsed,
                     line_num,
                     &mut block_name_to_start_line,
@@ -532,7 +536,8 @@ impl FileSet {
             .collect();
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, Some(root_path))?;
+            let path = path.canonicalize()?;
+            let (file, files_to_parse) = File::parse(Rc::new(path.clone()), Some(root_path))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
@@ -587,7 +592,8 @@ impl FileSet {
         }
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(&path, Some(root_path.as_path()))?;
+            let (file, files_to_parse) =
+                File::parse(Rc::new(path.clone()), Some(root_path.as_path()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
