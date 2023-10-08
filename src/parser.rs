@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use rayon::prelude::*;
 
 use crate::file::{File, OnChangeBlock};
 use crate::git::{Hunk, Repo};
@@ -152,38 +153,35 @@ impl Parser {
             ));
         }
 
+        // Walk the directory (single-threaded).
         let dir_walker = ignore::WalkBuilder::new(&root_path)
             .ignore(ignore)
             .git_global(ignore)
             .git_ignore(ignore)
             .git_exclude(ignore)
-            .build_parallel();
+            .build();
+        let paths: Vec<PathBuf> = dir_walker
+            .filter_map(|e| {
+                let path = e.as_ref().unwrap().path().to_owned();
+                if !path.is_file() {
+                    None
+                } else {
+                    Some(path)
+                }
+            })
+            .collect();
 
-        let (tx, rx) = crossbeam_channel::bounded(100);
-
-        let root_path_copy = root_path.clone();
-        let h = std::thread::spawn(move || {
-            let root_path_copy = &root_path_copy;
-            dir_walker.run(|| {
-                let tx = tx.clone();
-                Box::new(move |result| {
-                    use ignore::WalkState::*;
-                    let path = result.as_ref().unwrap().path();
-                    if path.is_file() {
-                        let (f, _) = File::parse(path.to_path_buf(), Some(root_path_copy)).unwrap();
-                        tx.send(f).unwrap();
-                    }
-                    Continue
-                })
-            });
-            drop(tx);
-        });
-
-        for f in rx {
+        // Parse the files (multi-threaded).
+        let file_items: Vec<_> = paths
+            .par_iter()
+            .map(|p| {
+                let (f, _) = File::parse(p.to_path_buf(), Some(root_path.clone())).unwrap();
+                f
+            })
+            .collect();
+        for f in file_items {
             files.insert(f.path.clone(), f);
         }
-
-        h.join().unwrap();
 
         let mut num_blocks = 0;
         for (_, f) in &files {
