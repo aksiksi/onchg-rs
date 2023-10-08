@@ -20,9 +20,9 @@ pub fn directory(c: &mut Criterion) {
         b.iter(|| {
             let mut cmd = std::process::Command::new("grep");
             cmd.current_dir(d.path())
-                .args(&["-rE", ON_CHANGE_PAT_STR, "."])
+                .args(&["-rP", ON_CHANGE_PAT_STR, "."])
                 .stdout(std::process::Stdio::null());
-            cmd.spawn().unwrap().wait().unwrap();
+            assert!(cmd.spawn().unwrap().wait().unwrap().success());
         });
     });
 
@@ -42,9 +42,9 @@ pub fn directory(c: &mut Criterion) {
         b.iter(|| {
             let mut cmd = std::process::Command::new("grep");
             cmd.current_dir(d.path())
-                .args(&["-rE", ON_CHANGE_PAT_STR, "."])
+                .args(&["-rP", ON_CHANGE_PAT_STR, "."])
                 .stdout(std::process::Stdio::null());
-            cmd.spawn().unwrap().wait().unwrap();
+            assert!(cmd.spawn().unwrap().wait().unwrap().success());
         });
     });
 }

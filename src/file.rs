@@ -366,11 +366,14 @@ impl File {
         Ok(block)
     }
 
-    fn try_find_on_change_captures(data: &[u8]) -> Option<impl Iterator<Item = Captures>> {
-        if !ON_CHANGE_PAT.is_match(data) {
+    fn try_find_on_change_captures<'a>(
+        data: &'a [u8],
+        pat: &'a Regex,
+    ) -> Option<impl Iterator<Item = Captures<'a>>> {
+        if !pat.is_match(data) {
             None
         } else {
-            Some(ON_CHANGE_PAT.captures_iter(data))
+            Some(pat.captures_iter(data))
         }
     }
 
@@ -413,9 +416,13 @@ impl File {
         let mut block_stack: Vec<OnChangeBlock> = Vec::new();
         let mut block_name_to_start_line: HashMap<String, usize> = HashMap::new();
 
+        // Clone the regex to reduce contention.
+        // See: https://docs.rs/regex/1.9.6/regex/index.html#sharing-a-regex-across-threads-can-result-in-contention
+        let pat = ON_CHANGE_PAT.clone();
+
         // Build set of line matches based on byte position in the file.
         let mut matches: Vec<LineMatch> = Vec::new();
-        if let Some(captures) = Self::try_find_on_change_captures(&buf) {
+        if let Some(captures) = Self::try_find_on_change_captures(&buf, &pat) {
             for c in captures {
                 // Use start of the overall match as the byte position.
                 let pos = c.get(0).unwrap().start();

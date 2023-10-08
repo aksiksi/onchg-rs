@@ -16,7 +16,11 @@ fn test_directory() {
     let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 100, 100);
     f.init(20, 150);
 
-    eprintln!("Initialized random directory tree in {:?}", s.elapsed());
+    eprintln!(
+        "Initialized random directory tree in {:?} at {}",
+        s.elapsed(),
+        d.path().display()
+    );
 
     let s = std::time::Instant::now();
 
@@ -44,8 +48,9 @@ fn test_git_repo() {
     d.commit(None);
 
     eprintln!(
-        "Initialized random directory tree and repo in {:?}",
-        s.elapsed()
+        "Initialized random directory tree and repo in {:?} at {}",
+        s.elapsed(),
+        d.path().display()
     );
 
     // Touch a few random blocks and stage them.
