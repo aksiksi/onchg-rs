@@ -6,11 +6,27 @@ use onchg::Parser;
 
 #[derive(clap::Parser, Clone, Debug)]
 enum Mode {
+    /// Validate changes to staged files in a Git repo.
+    ///
+    /// This looks at any staged file(s) and ensures that all block
+    /// targets in the staged file(s) are also staged. Unlike in "directory"
+    /// mode, ignore files are _not_ checked.
     Repo { path: PathBuf },
-    Directory { path: PathBuf },
+    /// Check all files in a directory. By default, this will skip parsing any files
+    /// specified in the various ignore files.
+    ///
+    /// See the [ignore] crate for more details.
+    Directory {
+        path: PathBuf,
+
+        /// Do not adhere to Git ignore files.
+        #[clap(long, default_value_t = false)]
+        no_ignore: bool,
+    },
 }
 
 #[derive(clap::Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 struct Cli {
     #[clap(subcommand)]
     mode: Mode,
@@ -23,11 +39,11 @@ fn main() {
     let cli = Cli::parse();
 
     let parser = match &cli.mode {
-        Mode::Directory { path } => Parser::from_directory(path),
-        Mode::Repo { path } => Parser::from_git_repo(path),
+        Mode::Directory { path, no_ignore } => Parser::from_directory(path, !no_ignore),
+        Mode::Repo { path, .. } => Parser::from_git_repo(path),
     };
     if let Err(e) = parser {
-        eprintln!("Error: {}", e);
+        eprintln!("Parsing failed: {}", e);
         std::process::exit(1);
     }
     let parser = parser.unwrap();

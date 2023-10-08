@@ -1,17 +1,3 @@
-//! The core logic is as follows:
-//!
-//! 1. Parse the file to determine if it contains a OnChange block. This is done
-//!    by processing the file line-by-line and checking against a regex.
-//! 2. If a block is found, parse the block name. If no name is provided, use :default.
-//! 3. Keep parsing until a ThenChange line is found (also using regex). If EOF is
-//!    reached, return an error and terminate.
-//! 4. A file can have mutliple blocks. So, a File struct contains a map of Blocks.
-//! 5. Each block can optionally point to another Block. This is resolved eagerly by
-//!    following the link to the block.
-//!
-//! F1 -> [B1, B2, ..., BN]
-//!             |
-//! F2 -> [B1, B2, ..., BN]
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::BufRead;
@@ -559,7 +545,7 @@ impl FileSet {
     /// Recursively walks through all files in the given path and parses them.
     ///
     /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
-    pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn from_directory<P: AsRef<Path>>(path: P, ignore: bool) -> Result<Self> {
         let root_path = path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
         let mut file_stack: Vec<PathBuf> = Vec::new();
@@ -571,7 +557,12 @@ impl FileSet {
             ));
         }
 
-        let dir_walker = WalkBuilder::new(&root_path).build();
+        let dir_walker = WalkBuilder::new(&root_path)
+            .ignore(ignore)
+            .git_global(ignore)
+            .git_ignore(ignore)
+            .git_exclude(ignore)
+            .build();
         for entry in dir_walker {
             match entry {
                 Err(e) => {
@@ -658,7 +649,7 @@ mod test {
             ),
         ];
         let d = TestDir::from_files(files);
-        FileSet::from_directory(d.path()).unwrap();
+        FileSet::from_directory(d.path(), false).unwrap();
     }
 
     #[test]

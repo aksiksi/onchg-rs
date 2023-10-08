@@ -31,8 +31,8 @@ impl Parser {
     /// Recursively walks through all files in the given path and parses them.
     ///
     /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
-    pub fn from_directory<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file_set = FileSet::from_directory(&path)?;
+    pub fn from_directory<P: AsRef<Path>>(path: P, ignore: bool) -> Result<Self> {
+        let file_set = FileSet::from_directory(&path, ignore)?;
         Ok(Self {
             file_set,
             root_path: path.as_ref().to_owned(),
@@ -284,7 +284,7 @@ mod test {
             ),
         ];
         let d = TestDir::from_files(files);
-        Parser::from_directory(d.path()).unwrap();
+        Parser::from_directory(d.path(), true).unwrap();
     }
 
     #[test]
