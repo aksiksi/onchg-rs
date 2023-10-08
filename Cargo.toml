@@ -3,24 +3,29 @@ name = "onchg"
 version = "0.1.0"
 edition = "2021"
 
+[[bench]]
+name = "onchg"
+harness = false
+
 [features]
 default = []
 git = ["git2"]
 
 [dependencies]
 anyhow = "1.0.75"
+base64 = "0.21.4"
 clap = { version = "4.4.4", features = ["derive"] }
 crossbeam-channel = "0.5.8"
 # We only need local Git repo support. Default features enable remote clone & fetch.
 git2 = { version = "0.18", optional = true, default-features = false }
 ignore = "0.4.20"
 patch = "0.7.0"
+rand = "0.8.5"
 regex = "1.9.5"
 tempfile = "3.8.0"
 
 [dev-dependencies]
 assert_cmd = "2"
-base64 = "0.21.4"
+criterion = "0.3"
 indoc = "2.0.4"
 predicates = "3.0.4"
-rand = "0.8.5"

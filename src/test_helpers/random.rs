@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use base64::Engine;
 use rand::{RngCore, SeedableRng};
 
-use onchg::{OnChangeBlock, ThenChange, ThenChangeTarget};
+use crate::{OnChangeBlock, ThenChange, ThenChangeTarget};
 
 pub struct RandomOnChangeTree {
     root: PathBuf,

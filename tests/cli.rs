@@ -4,9 +4,6 @@ use std::process::Command;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 
-mod helpers;
-
-use helpers::*;
 use onchg::test_helpers::*;
 
 #[test]

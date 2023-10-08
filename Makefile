@@ -3,6 +3,9 @@ all: test fmt
 check:
 	cargo check
 
+benches:
+	cargo bench
+
 build: check
 	cargo build
 
@@ -24,4 +27,4 @@ coverage:
 fmt:
 	cargo fmt
 
-.PHONY: all build check ci coverage fmt test
+.PHONY: all benches build check ci coverage fmt test
