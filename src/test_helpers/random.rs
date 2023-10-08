@@ -13,6 +13,7 @@ pub struct RandomOnChangeTree {
     directories: Vec<PathBuf>,
     blocks: Vec<(PathBuf, OnChangeBlock)>,
     max_directory_depth: usize,
+    min_blocks_per_file: usize,
     max_blocks_per_file: usize,
     max_lines_per_block: usize,
 }
@@ -22,6 +23,7 @@ impl RandomOnChangeTree {
         root: PathBuf,
         seed: u64,
         max_directory_depth: usize,
+        min_blocks_per_file: usize,
         max_blocks_per_file: usize,
         max_lines_per_block: usize,
     ) -> Self {
@@ -39,6 +41,7 @@ impl RandomOnChangeTree {
             directories: Vec::new(),
             blocks: Vec::new(),
             max_directory_depth,
+            min_blocks_per_file,
             max_blocks_per_file,
             max_lines_per_block,
         }
@@ -58,29 +61,33 @@ impl RandomOnChangeTree {
         String::from(&s[..s.len() - 1])
     }
 
-    fn rand_in_range(&mut self, max: usize) -> usize {
+    fn rand_le(&mut self, max: usize) -> usize {
         self.rng.next_u32() as usize % max
     }
 
+    fn rand_in_range(&mut self, min: usize, max: usize) -> usize {
+        self.rng.next_u32() as usize % (max - min) + min
+    }
+
     fn rand_bool(&mut self) -> bool {
-        self.rand_in_range(2) == 0
+        self.rand_le(2) == 0
     }
 
     // Lifetimes are tricky with this one...
     #[allow(unused)]
     fn rand_elem<'a, T>(&mut self, elems: &'a [T]) -> &'a T {
-        &elems[self.rand_in_range(elems.len())]
+        &elems[self.rand_le(elems.len())]
     }
 
     fn create_directory(&mut self) {
-        let mut depth = self.rand_in_range(self.max_directory_depth + 1);
+        let mut depth = self.rand_le(self.max_directory_depth + 1);
 
         // If we have existing directories, we should randomly try to choose one as a parent.
         let mut parent: Option<PathBuf> = None;
         if self.directories.len() > 0 && self.rand_bool() {
             // This attempt will fail if the parent's depth is equal to the max depth.
             // In this case, we simply fallback to the normal flow.
-            let n = self.rand_in_range(self.directories.len());
+            let n = self.rand_le(self.directories.len());
             let p = &self.directories[n];
             let parent_depth = p.components().collect::<Vec<_>>().len();
             if parent_depth < self.max_directory_depth {
@@ -107,7 +114,7 @@ impl RandomOnChangeTree {
     }
 
     fn create_file(&mut self) {
-        let n = self.rand_in_range(self.directories.len());
+        let n = self.rand_le(self.directories.len());
         let file_name = format!("{}.file", self.rand_string());
         let d = &self.directories[n];
         let path = d.join(file_name);
@@ -156,10 +163,10 @@ impl RandomOnChangeTree {
     fn create_blocks(&mut self, path: PathBuf, f: &mut std::fs::File) -> Vec<OnChangeBlock> {
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
 
-        let num_blocks = self.rand_in_range(self.max_blocks_per_file);
+        let num_blocks = self.rand_in_range(self.min_blocks_per_file, self.max_blocks_per_file + 1);
         let mut line_num = 0;
         for _ in 0..num_blocks {
-            let num_lines = self.rand_in_range(self.max_lines_per_block);
+            let num_lines = self.rand_le(self.max_lines_per_block);
             let block_name = if self.rand_bool() {
                 Some(self.rand_string())
             } else {
@@ -174,12 +181,12 @@ impl RandomOnChangeTree {
                 // Target an existing file + block.
                 let (p, b) = {
                     let target_blocks = self.targetable_blocks();
-                    let r = self.rand_in_range(target_blocks.len());
+                    let r = self.rand_le(target_blocks.len());
                     let b = self.targetable_blocks()[r].clone();
                     (b.0.to_owned(), b.1.to_owned())
                 };
                 then_change_file = Some(p);
-                then_change_block = if self.rand_in_range(100) < 25 {
+                then_change_block = if self.rand_le(100) < 25 {
                     // 25% chance to only use a file target.
                     None
                 } else {
@@ -228,7 +235,7 @@ impl RandomOnChangeTree {
     }
 
     pub fn touch_random_block(&mut self) {
-        let n = self.rand_in_range(self.targetable_blocks().len());
+        let n = self.rand_le(self.targetable_blocks().len());
         let (p, b) = self.targetable_blocks()[n];
         let start_line = b.start_line() as usize;
 
