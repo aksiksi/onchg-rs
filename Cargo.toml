@@ -16,10 +16,12 @@ anyhow = "1.0.75"
 base64 = "0.21.4"
 bstr = "1.6.2"
 clap = { version = "4.4.4", features = ["derive"] }
+env_logger = "0.10.0"
 # We only need local Git repo support. Default features enable remote clone & fetch.
 git2 = { version = "0.18", optional = true, default-features = false }
 ignore = "0.4.20"
 lazy_static = "1.4.0"
+log = "0.4.20"
 patch = "0.7.0"
 rand = "0.8.5"
 rayon = "1.8.0"

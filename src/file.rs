@@ -398,7 +398,7 @@ impl File {
     pub fn parse<P: AsRef<Path>>(
         path: PathBuf,
         root_path: Option<P>,
-    ) -> Result<(Self, HashSet<PathBuf>)> {
+    ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
         let path_ref = Arc::new(path.clone());
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
@@ -408,9 +408,6 @@ impl File {
         let mut f = std::fs::File::open(path.as_path())?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
-
-        // Build a mapping from byte position to line number.
-        let byte_pos_to_line_mapping = Self::build_byte_pos_to_line_mapping(&buf);
 
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
         let mut block_stack: Vec<OnChangeBlock> = Vec::new();
@@ -430,9 +427,12 @@ impl File {
             }
         }
 
-        // Sort matches by byte position. This ensures that we get a correct order for OnChange
-        // and ThenChange blocks in the file.
-        matches.sort_by(|m1, m2| m1.pos().cmp(&m2.pos()));
+        if matches.is_empty() {
+            return Ok(None);
+        }
+
+        // Build a mapping from byte position to line number.
+        let byte_pos_to_line_mapping = Self::build_byte_pos_to_line_mapping(&buf);
 
         for m in matches {
             let line_num = Self::byte_to_line(&byte_pos_to_line_mapping, m.pos());
@@ -472,6 +472,6 @@ impl File {
             ));
         }
 
-        Ok((File { path, blocks }, files_to_parse))
+        Ok(Some((File { path, blocks }, files_to_parse)))
     }
 }

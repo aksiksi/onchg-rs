@@ -36,6 +36,8 @@ struct Cli {
 }
 
 fn main() {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     let parser = match &cli.mode {

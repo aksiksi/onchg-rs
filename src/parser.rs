@@ -114,13 +114,18 @@ impl Parser {
             })
             .collect();
 
+        let s = std::time::Instant::now();
+
         while let Some(path) = file_stack.pop() {
             let path = path.canonicalize()?;
-            let (file, files_to_parse) = File::parse(path.clone(), Some(root_path.as_path()))?;
-            files.insert(path, file);
-            for file_path in files_to_parse {
-                if !files.contains_key(&file_path) {
-                    file_stack.push(file_path);
+            if let Some((file, files_to_parse)) =
+                File::parse(path.clone(), Some(root_path.as_path()))?
+            {
+                files.insert(path, file);
+                for file_path in files_to_parse {
+                    if !files.contains_key(&file_path) {
+                        file_stack.push(file_path);
+                    }
                 }
             }
         }
@@ -130,12 +135,22 @@ impl Parser {
             num_blocks += file.blocks.len();
         }
 
+        log::info!(
+            "Parsed {} files ({} blocks) in {:?}",
+            files.len(),
+            num_blocks,
+            s.elapsed()
+        );
+
+        let s = std::time::Instant::now();
+
         let parser = Self {
             root_path,
             files,
             num_blocks,
         };
         parser.validate()?;
+        log::info!("Validated {} blocks in {:?}", num_blocks, s.elapsed());
         Ok(parser)
     }
 
@@ -152,6 +167,8 @@ impl Parser {
                 root_path.display()
             ));
         }
+
+        let s = std::time::Instant::now();
 
         // Walk the directory (single-threaded).
         let dir_walker = ignore::WalkBuilder::new(&root_path)
@@ -171,12 +188,20 @@ impl Parser {
             })
             .collect();
 
+        log::info!("Walked {} file paths in {:?}", paths.len(), s.elapsed());
+
+        let s = std::time::Instant::now();
+
         // Parse the files (multi-threaded).
         let file_items: Vec<_> = paths
             .par_iter()
-            .map(|p| {
-                let (f, _) = File::parse(p.to_path_buf(), Some(root_path.clone())).unwrap();
-                f
+            .filter_map(|p| {
+                if let Some((f, _)) = File::parse(p.to_path_buf(), Some(root_path.clone())).unwrap()
+                {
+                    Some(f)
+                } else {
+                    None
+                }
             })
             .collect();
         for f in file_items {
@@ -187,12 +212,22 @@ impl Parser {
         for (_, f) in &files {
             num_blocks += f.blocks.len();
         }
+
+        log::info!(
+            "Parsed {} files ({} blocks) in {:?}",
+            paths.len(),
+            num_blocks,
+            s.elapsed()
+        );
+
+        let s = std::time::Instant::now();
         let parser = Parser {
             root_path,
             files,
             num_blocks,
         };
         parser.validate()?;
+        log::info!("Validated {} blocks in {:?}", num_blocks, s.elapsed());
         Ok(parser)
     }
 
