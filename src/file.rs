@@ -2,7 +2,7 @@ use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::Result;
 use regex::Regex;
@@ -33,7 +33,7 @@ pub enum ThenChange {
 
 #[derive(Clone, Debug)]
 pub struct OnChangeBlock {
-    file: Rc<PathBuf>,
+    file: Arc<PathBuf>,
     // The name would be None for an untargetable block.
     name: Option<String>,
     start_line: u32,
@@ -50,7 +50,7 @@ impl OnChangeBlock {
         then_change: ThenChange,
     ) -> Self {
         Self {
-            file: Rc::new(file),
+            file: Arc::new(file),
             name,
             start_line,
             end_line,
@@ -294,7 +294,7 @@ impl File {
     }
 
     fn handle_on_change(
-        file: Rc<PathBuf>,
+        file: Arc<PathBuf>,
         parsed: String,
         line_num: usize,
         block_name_to_start_line: &mut HashMap<String, usize>,
@@ -355,10 +355,11 @@ impl File {
         Ok(block)
     }
 
-    pub fn parse<P: AsRef<Path>>(
-        path: Rc<PathBuf>,
-        root_path: Option<P>,
+    pub fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
+        path: P,
+        root_path: Option<Q>,
     ) -> Result<(Self, HashSet<PathBuf>)> {
+        let path = Arc::new(path.as_ref().to_owned());
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
         // Set of files that need to be parsed based on OnChange targets seen in this file.

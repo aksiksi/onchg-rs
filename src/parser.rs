@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use anyhow::Result;
 
@@ -116,8 +115,7 @@ impl Parser {
 
         while let Some(path) = file_stack.pop() {
             let path = path.canonicalize()?;
-            let (file, files_to_parse) =
-                File::parse(Rc::new(path.clone()), Some(root_path.as_path()))?;
+            let (file, files_to_parse) = File::parse(path.clone(), Some(root_path.as_path()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
@@ -181,8 +179,7 @@ impl Parser {
         }
 
         while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) =
-                File::parse(Rc::new(path.clone()), Some(root_path.as_path()))?;
+            let (file, files_to_parse) = File::parse(path.clone(), Some(root_path.as_path()))?;
             files.insert(path, file);
             for file_path in files_to_parse {
                 if !files.contains_key(&file_path) {
