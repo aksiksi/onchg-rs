@@ -140,11 +140,10 @@ impl Parser {
 
     /// Recursively walks through all files in the given path and parses them.
     ///
-    /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
+    /// If ignore is set, this method will respect .gitignore and .ignore files (via [[ignore]]).
     pub fn from_directory<P: AsRef<Path>>(path: P, ignore: bool) -> Result<Self> {
         let root_path = path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
-        let mut file_stack: Vec<PathBuf> = Vec::new();
 
         if !root_path.is_dir() {
             return Err(anyhow::anyhow!(
@@ -158,41 +157,38 @@ impl Parser {
             .git_global(ignore)
             .git_ignore(ignore)
             .git_exclude(ignore)
-            .build();
-        for entry in dir_walker {
-            match entry {
-                Err(e) => {
-                    println!("Error: {}", e);
-                    continue;
-                }
-                Ok(entry) => {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        continue;
+            .build_parallel();
+
+        let (tx, rx) = crossbeam_channel::bounded(100);
+
+        let root_path_copy = root_path.clone();
+        let h = std::thread::spawn(move || {
+            let root_path_copy = &root_path_copy;
+            dir_walker.run(|| {
+                let tx = tx.clone();
+                Box::new(move |result| {
+                    use ignore::WalkState::*;
+                    let path = result.as_ref().unwrap().path();
+                    if path.is_file() {
+                        let (f, _) = File::parse(path.to_path_buf(), Some(root_path_copy)).unwrap();
+                        tx.send(f).unwrap();
                     }
-                    let file_path = path.to_owned().canonicalize()?;
-                    if !files.contains_key(&file_path) {
-                        file_stack.push(file_path);
-                    }
-                }
-            }
+                    Continue
+                })
+            });
+            drop(tx);
+        });
+
+        for f in rx {
+            files.insert(f.path.clone(), f);
         }
 
-        while let Some(path) = file_stack.pop() {
-            let (file, files_to_parse) = File::parse(path.clone(), Some(root_path.as_path()))?;
-            files.insert(path, file);
-            for file_path in files_to_parse {
-                if !files.contains_key(&file_path) {
-                    file_stack.push(file_path);
-                }
-            }
-        }
+        h.join().unwrap();
 
         let mut num_blocks = 0;
-        for file in files.values() {
-            num_blocks += file.blocks.len();
+        for (_, f) in &files {
+            num_blocks += f.blocks.len();
         }
-
         let parser = Parser {
             root_path,
             files,
@@ -221,8 +217,8 @@ impl Parser {
             .and_then(|f| f.blocks.iter().find(|b| b.name() == block_name))
     }
 
-    pub fn files(&self) -> Vec<&Path> {
-        self.files.keys().map(|p| p.as_path()).collect()
+    pub fn paths(&self) -> impl Iterator<Item = &Path> {
+        self.files.keys().map(|p| p.as_path())
     }
 
     pub fn root_path(&self) -> &Path {

@@ -164,6 +164,7 @@ impl OnChangeBlock {
 
 #[derive(Debug)]
 pub struct File {
+    pub(crate) path: PathBuf,
     pub(crate) blocks: Vec<OnChangeBlock>,
 }
 
@@ -355,11 +356,11 @@ impl File {
         Ok(block)
     }
 
-    pub fn parse<P: AsRef<Path>, Q: AsRef<Path>>(
-        path: P,
-        root_path: Option<Q>,
+    pub fn parse<P: AsRef<Path>>(
+        path: PathBuf,
+        root_path: Option<P>,
     ) -> Result<(Self, HashSet<PathBuf>)> {
-        let path = Arc::new(path.as_ref().to_owned());
+        let path_ref = Arc::new(path.clone());
         let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
         // Set of files that need to be parsed based on OnChange targets seen in this file.
@@ -378,13 +379,13 @@ impl File {
                 Err(e) => {
                     // TODO(aksiksi): We can probably do something cleaner here.
                     eprintln!("Error reading lines from {}: {}", path.display(), e);
-                    return Ok((File { blocks }, files_to_parse));
+                    return Ok((File { path, blocks }, files_to_parse));
                 }
             };
             let line_num = line_num + 1;
             if let Some(parsed) = Self::try_parse_on_change_line(&line) {
                 Self::handle_on_change(
-                    path.clone(),
+                    path_ref.clone(),
                     parsed,
                     line_num,
                     &mut block_name_to_start_line,
@@ -414,6 +415,6 @@ impl File {
             ));
         }
 
-        Ok((File { blocks }, files_to_parse))
+        Ok((File { path, blocks }, files_to_parse))
     }
 }

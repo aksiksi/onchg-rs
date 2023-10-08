@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser as CliParser;
 
@@ -48,7 +48,7 @@ fn main() {
     }
     let parser = parser.unwrap();
 
-    let mut files = parser.files();
+    let mut files: Vec<&Path> = parser.paths().collect();
     files.sort();
 
     println!("Root path: {}\n", parser.root_path().display());
