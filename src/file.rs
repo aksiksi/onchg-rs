@@ -172,16 +172,14 @@ impl<'a> LineMatch<'a> {
     #[inline(always)]
     fn pos(&self) -> usize {
         match *self {
-            LineMatch::OnChange(p, _) => p,
-            LineMatch::ThenChange(p, _) => p,
+            LineMatch::OnChange(p, _) | LineMatch::ThenChange(p, _) => p,
         }
     }
 
     #[inline(always)]
     fn data(&self) -> &[u8] {
         match *self {
-            LineMatch::OnChange(_, d) => d,
-            LineMatch::ThenChange(_, d) => d,
+            LineMatch::OnChange(_, d) | LineMatch::ThenChange(_, d) => d,
         }
     }
 }
@@ -420,10 +418,12 @@ impl File {
         let mut matches: Vec<LineMatch> = Vec::new();
         if let Some(captures) = Self::try_find_on_change_captures(&buf) {
             for c in captures {
+                // Use start of the overall match as the byte position.
+                let pos = c.get(0).unwrap().start();
                 if let Some(m) = c.name(ON_CHANGE_GROUP) {
-                    matches.push(LineMatch::OnChange(m.start(), m.as_bytes()));
+                    matches.push(LineMatch::OnChange(pos, m.as_bytes()));
                 } else if let Some(m) = c.name(THEN_CHANGE_GROUP) {
-                    matches.push(LineMatch::ThenChange(m.start(), m.as_bytes()));
+                    matches.push(LineMatch::ThenChange(pos, m.as_bytes()));
                 }
             }
         }
