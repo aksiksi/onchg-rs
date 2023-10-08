@@ -11,8 +11,10 @@ use crate::git::{Hunk, Line};
 
 const ON_CHANGE_GROUP: &str = "on_change";
 const THEN_CHANGE_GROUP: &str = "then_change";
+pub const ON_CHANGE_PAT_STR: &str =
+    r"LINT\.OnChange\((?<on_change>.*?)\)|LINT\.ThenChange\((?<then_change>.*?)\)";
 lazy_static::lazy_static! {
-    static ref ON_CHANGE_PAT: Regex = Regex::new(r"LINT\.OnChange\((?<on_change>.*?)\)|LINT\.ThenChange\((?<then_change>.*?)\)").unwrap();
+    static ref ON_CHANGE_PAT: Regex = Regex::new(ON_CHANGE_PAT_STR).unwrap();
 }
 
 #[derive(Clone, Debug)]

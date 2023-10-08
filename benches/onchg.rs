@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use onchg::test_helpers::*;
-use onchg::Parser;
+use onchg::{Parser, ON_CHANGE_PAT_STR};
 
 const SEED: u64 = 456;
 
@@ -20,7 +20,7 @@ pub fn directory(c: &mut Criterion) {
         b.iter(|| {
             let mut cmd = std::process::Command::new("grep");
             cmd.current_dir(d.path())
-                .args(&["-rE", "LINT.OnChange|LINT.ThenChange", "."])
+                .args(&["-rE", ON_CHANGE_PAT_STR, "."])
                 .stdout(std::process::Stdio::null());
             cmd.spawn().unwrap().wait().unwrap();
         });
@@ -42,8 +42,7 @@ pub fn directory(c: &mut Criterion) {
         b.iter(|| {
             let mut cmd = std::process::Command::new("grep");
             cmd.current_dir(d.path())
-                // This pattern simulates what onchg is looking for on each line.
-                .args(&["-rE", "LINT.OnChange(.*).*$|LINT.ThenChange(.*).*$", "."])
+                .args(&["-rE", ON_CHANGE_PAT_STR, "."])
                 .stdout(std::process::Stdio::null());
             cmd.spawn().unwrap().wait().unwrap();
         });
