@@ -23,7 +23,7 @@ fn test_directory() {
 
     let s = std::time::Instant::now();
 
-    Command::cargo_bin("onchg")
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
         .unwrap()
         .args(&["directory", "."])
         .current_dir(d.path())
@@ -59,7 +59,7 @@ fn test_git_repo() {
 
     let s = std::time::Instant::now();
 
-    Command::cargo_bin("onchg")
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
         .unwrap()
         .args(&["repo", "."])
         .current_dir(d.path())

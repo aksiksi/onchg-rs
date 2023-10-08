@@ -1,54 +1,231 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use anyhow::Result;
 
-use crate::core::{FileSet, OnChangeBlock};
+use crate::file::{File, OnChangeBlock};
 use crate::git::{Hunk, Repo};
+use crate::{ThenChange, ThenChangeTarget};
 
 #[derive(Debug)]
 pub struct Parser {
     root_path: PathBuf,
-    file_set: FileSet,
+    files: BTreeMap<PathBuf, File>,
+    num_blocks: usize,
 }
 
 impl Parser {
+    fn validate_block_target(
+        &self,
+        path: &Path,
+        block: &OnChangeBlock,
+        target: &ThenChangeTarget,
+        blocks: &HashMap<(&Path, &str), &OnChangeBlock>,
+    ) -> Result<()> {
+        let (target_block, target_file) = (&target.block, target.file.as_ref());
+        if let Some(file) = target_file {
+            let block_key = (file.as_ref(), target_block.as_str());
+            if !blocks.contains_key(&block_key) {
+                return Err(anyhow::anyhow!(
+                    r#"block "{}" in file "{}" has invalid OnChange target "{}:{}" (line {})"#,
+                    block.name(),
+                    path.display(),
+                    file.display(),
+                    target_block,
+                    block.end_line(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns a map of all _targetable_ blocks in the file set.
+    fn on_change_blocks(&self) -> HashMap<(&Path, &str), &OnChangeBlock> {
+        let mut blocks = HashMap::with_capacity(self.num_blocks);
+        for (path, file) in self.files.iter() {
+            for block in file.blocks.iter() {
+                if !block.is_targetable() {
+                    continue;
+                }
+                blocks.insert((path.as_path(), block.name()), block);
+            }
+        }
+        blocks
+    }
+
+    fn validate(&self) -> Result<()> {
+        let blocks = self.on_change_blocks();
+
+        for (path, file) in &self.files {
+            for block in &file.blocks {
+                match block.then_change() {
+                    ThenChange::NoTarget => {}
+                    ThenChange::BlockTarget(target_blocks) => {
+                        for target in target_blocks {
+                            Self::validate_block_target(&self, path, block, target, &blocks)?;
+                        }
+                    }
+                    ThenChange::FileTarget(target_path) => {
+                        if !self.files.contains_key(target_path) {
+                            return Err(anyhow::anyhow!(
+                                r#"block "{}" in file "{}" has invalid ThenChange target "{}" (line {})"#,
+                                block.name(),
+                                path.display(),
+                                target_path.display(),
+                                block.end_line(),
+                            ));
+                        }
+                    }
+                    ThenChange::Unset => {
+                        return Err(anyhow::anyhow!(
+                            r#"block "{}" in file "{}" has an unset OnChange target (line {})"#,
+                            block.name(),
+                            path.display(),
+                            block.end_line(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Builds a parser from the given set of files, as well as any files they depend
     /// on, recursively.
     ///
     /// TODO(aksiksi): Respect .gitignore and .ignore files via [[ignore]].
-    pub fn from_files<P: AsRef<Path>>(
+    pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(
         paths: impl Iterator<Item = P>,
-        root_path: PathBuf,
+        root_path: Q,
     ) -> Result<Self> {
-        let file_set = FileSet::from_files(paths, &root_path)?;
-        Ok(Self {
-            file_set,
+        let root_path = root_path.as_ref().canonicalize()?;
+        let mut files = BTreeMap::new();
+
+        let mut file_stack: Vec<PathBuf> = paths
+            .map(|p| {
+                let path = p.as_ref();
+                if path.exists() {
+                    path.to_owned()
+                } else {
+                    root_path.join(path)
+                }
+            })
+            .collect();
+
+        while let Some(path) = file_stack.pop() {
+            let path = path.canonicalize()?;
+            let (file, files_to_parse) =
+                File::parse(Rc::new(path.clone()), Some(root_path.as_path()))?;
+            files.insert(path, file);
+            for file_path in files_to_parse {
+                if !files.contains_key(&file_path) {
+                    file_stack.push(file_path);
+                }
+            }
+        }
+
+        let mut num_blocks = 0;
+        for file in files.values() {
+            num_blocks += file.blocks.len();
+        }
+
+        let parser = Self {
             root_path,
-        })
+            files,
+            num_blocks,
+        };
+        parser.validate()?;
+        Ok(parser)
     }
 
     /// Recursively walks through all files in the given path and parses them.
     ///
     /// Note that this method respects .gitignore and .ignore files (via [[ignore]]).
     pub fn from_directory<P: AsRef<Path>>(path: P, ignore: bool) -> Result<Self> {
-        let file_set = FileSet::from_directory(&path, ignore)?;
-        Ok(Self {
-            file_set,
-            root_path: path.as_ref().to_owned(),
-        })
-    }
+        let root_path = path.as_ref().canonicalize()?;
+        let mut files = BTreeMap::new();
+        let mut file_stack: Vec<PathBuf> = Vec::new();
 
-    pub fn files(&self) -> Vec<&Path> {
-        self.file_set.files()
+        if !root_path.is_dir() {
+            return Err(anyhow::anyhow!(
+                "{} is not a directory",
+                root_path.display()
+            ));
+        }
+
+        let dir_walker = ignore::WalkBuilder::new(&root_path)
+            .ignore(ignore)
+            .git_global(ignore)
+            .git_ignore(ignore)
+            .git_exclude(ignore)
+            .build();
+        for entry in dir_walker {
+            match entry {
+                Err(e) => {
+                    println!("Error: {}", e);
+                    continue;
+                }
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        continue;
+                    }
+                    let file_path = path.to_owned().canonicalize()?;
+                    if !files.contains_key(&file_path) {
+                        file_stack.push(file_path);
+                    }
+                }
+            }
+        }
+
+        while let Some(path) = file_stack.pop() {
+            let (file, files_to_parse) =
+                File::parse(Rc::new(path.clone()), Some(root_path.as_path()))?;
+            files.insert(path, file);
+            for file_path in files_to_parse {
+                if !files.contains_key(&file_path) {
+                    file_stack.push(file_path);
+                }
+            }
+        }
+
+        let mut num_blocks = 0;
+        for file in files.values() {
+            num_blocks += file.blocks.len();
+        }
+
+        let parser = Parser {
+            root_path,
+            files,
+            num_blocks,
+        };
+        parser.validate()?;
+        Ok(parser)
     }
 
     /// Returns a iterator over all of the blocks in a specific file.
-    fn on_change_blocks_in_file<P: AsRef<Path>>(
+    pub fn on_change_blocks_in_file<P: AsRef<Path>>(
         &self,
         path: P,
     ) -> Option<impl Iterator<Item = &OnChangeBlock>> {
-        self.file_set.on_change_blocks_in_file(path)
+        self.files.get(path.as_ref()).map(|file| file.blocks.iter())
+    }
+
+    /// Returns a iterator over all of the blocks in a specific file.
+    pub fn get_block_in_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+        block_name: &str,
+    ) -> Option<&OnChangeBlock> {
+        self.files
+            .get(path.as_ref())
+            .and_then(|f| f.blocks.iter().find(|b| b.name() == block_name))
+    }
+
+    pub fn files(&self) -> Vec<&Path> {
+        self.files.keys().map(|p| p.as_path()).collect()
     }
 
     pub fn root_path(&self) -> &Path {
@@ -152,7 +329,6 @@ impl Parser {
                 if let Some(on_change_block) = on_change_block {
                     if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
                         let target_block = self
-                            .file_set
                             .get_block_in_file(on_change_file, on_change_block)
                             .expect("block should exist");
                         violations.push(OnChangeViolation {
@@ -235,6 +411,232 @@ mod test {
 
     #[test]
     fn test_from_directory() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        Parser::from_directory(d.path(), false).unwrap();
+    }
+
+    #[test]
+    fn test_from_files() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange()\n
+                 abdbbda\n
+                 adadd\n
+                 LINT.ThenChange(f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        Parser::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_file_target() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange(this)\n
+                 LINT.ThenChange(f1.txt)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        Parser::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_file_target_parsed() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange(this)\n
+                 LINT.ThenChange(f1.txt)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        // Only provide f3.txt.
+        Parser::from_files(std::iter::once("f3.txt"), d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_relative_target() {
+        let files = &[
+            (
+                "abc/f1.txt",
+                "LINT.OnChange()\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(../f2.txt:other)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(other)\n
+                 LINT.ThenChange()",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        Parser::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_invalid_block_target_file_path() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f3.txt:default)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        let res = Parser::from_files(file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert_eq!(
+            err,
+            r#"OnChange target file "f3.txt" on line 6 does not exist"#
+        );
+    }
+
+    #[test]
+    fn test_from_files_invalid_block_target() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt:invalid)",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(default)\n
+                 LINT.ThenChange(f1.txt:default)",
+            ),
+        ];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        let res = Parser::from_files(file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("has invalid OnChange target"));
+    }
+
+    #[test]
+    fn test_from_files_duplicate_block_in_file() {
+        let files = &[(
+            "f1.txt",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.ThenChange(:other)
+             LINT.OnChange(default)\n
+             abdbbda\n
+             LINT.ThenChange(:other)
+             LINT.OnChange(other)\n
+             abdbbda\nadadd\n
+             LINT.ThenChange(:default)",
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        let res = Parser::from_files(file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 7"#));
+    }
+
+    #[test]
+    fn test_from_files_nested_on_change() {
+        let files = &[(
+            "f1.txt",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.OnChange(other)\n
+             LINT.ThenChange(:other)\n
+             LINT.ThenChange()",
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        Parser::from_files(file_names, d.path()).unwrap();
+    }
+
+    #[test]
+    fn test_from_files_nested_on_change_unbalanced() {
+        let files = &[(
+            "f1.txt",
+            "LINT.OnChange(default)\n
+             abdbbda\nadadd\n
+             LINT.OnChange(other)\n
+             LINT.ThenChange(:other)",
+        )];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        let res = Parser::from_files(file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains(
+            "while looking for ThenChange for block \"default\" which started on line 1"
+        ));
+    }
+
+    #[test]
+    fn test_from_files_eof_in_block() {
+        let files = &[("f1.txt", "LINT.OnChange(default)\nabdbbda\nadadd\n")];
+        let d = TestDir::from_files(files);
+        let file_names = files.iter().map(|f| f.0);
+        let res = Parser::from_files(file_names, d.path());
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("reached end of file"));
+    }
+
+    #[test]
+    fn test_from_directory_with_code() {
         let files = &[
             (
                 "f1.html",
