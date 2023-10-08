@@ -1,18 +1,18 @@
-use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
-use std::io::BufRead;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use regex::Regex;
+use bstr::ByteSlice;
+use regex::bytes::{Captures, Regex};
 
 use crate::git::{Hunk, Line};
 
-thread_local! {
-    // TODO(aksiksi): Clean these patterns up by making them more specific.
-    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r"LINT\.OnChange\((.*)\).*$").unwrap());
-    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r"LINT\.ThenChange\((.*)\).*$").unwrap());
+const ON_CHANGE_GROUP: &str = "on_change";
+const THEN_CHANGE_GROUP: &str = "then_change";
+lazy_static::lazy_static! {
+    static ref ON_CHANGE_PAT: Regex = Regex::new(r"LINT\.OnChange\((?<on_change>.*?)\)|LINT\.ThenChange\((?<then_change>.*?)\)").unwrap();
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +163,30 @@ impl OnChangeBlock {
 }
 
 #[derive(Debug)]
+enum LineMatch<'a> {
+    OnChange(usize, &'a [u8]),
+    ThenChange(usize, &'a [u8]),
+}
+
+impl<'a> LineMatch<'a> {
+    #[inline(always)]
+    fn pos(&self) -> usize {
+        match *self {
+            LineMatch::OnChange(p, _) => p,
+            LineMatch::ThenChange(p, _) => p,
+        }
+    }
+
+    #[inline(always)]
+    fn data(&self) -> &[u8] {
+        match *self {
+            LineMatch::OnChange(_, d) => d,
+            LineMatch::ThenChange(_, d) => d,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct File {
     pub(crate) path: PathBuf,
     pub(crate) blocks: Vec<OnChangeBlock>,
@@ -280,42 +304,6 @@ impl File {
         Ok(ThenChange::BlockTarget(then_change_targets))
     }
 
-    fn try_parse_on_change_line(line: &str) -> Option<&str> {
-        if !ON_CHANGE_PAT.with(|c| c.get().unwrap().is_match(line)) {
-            None
-        } else {
-            let s = ON_CHANGE_PAT.with(|c| {
-                c.get()
-                    .unwrap()
-                    .captures(&line)
-                    .unwrap()
-                    .get(1)
-                    .unwrap()
-                    .as_str()
-                    .trim()
-            });
-            Some(s)
-        }
-    }
-
-    fn try_parse_then_change_line(line: &str) -> Option<&str> {
-        if !THEN_CHANGE_PAT.with(|c| c.get().unwrap().is_match(line)) {
-            None
-        } else {
-            let s = THEN_CHANGE_PAT.with(|c| {
-                c.get()
-                    .unwrap()
-                    .captures(&line)
-                    .unwrap()
-                    .get(1)
-                    .unwrap()
-                    .as_str()
-                    .trim()
-            });
-            Some(s)
-        }
-    }
-
     fn handle_on_change(
         file: Arc<PathBuf>,
         parsed: &str,
@@ -378,6 +366,35 @@ impl File {
         Ok(block)
     }
 
+    fn try_find_on_change_captures(data: &[u8]) -> Option<impl Iterator<Item = Captures>> {
+        if !ON_CHANGE_PAT.is_match(data) {
+            None
+        } else {
+            Some(ON_CHANGE_PAT.captures_iter(data))
+        }
+    }
+
+    fn build_byte_pos_to_line_mapping(data: &[u8]) -> Vec<(usize, usize)> {
+        let mut v = Vec::new();
+        let mut pos = 0;
+        let mut line_num = 1;
+        for l in data.lines_with_terminator() {
+            v.push((pos, line_num));
+            line_num += 1;
+            pos += l.len();
+        }
+        v
+    }
+
+    fn byte_to_line(mapping: &[(usize, usize)], byte_pos: usize) -> usize {
+        let res = mapping.binary_search_by_key(&byte_pos, |(pos, _)| *pos);
+        let idx = match res {
+            Ok(idx) => idx,
+            Err(idx) => idx - 1,
+        };
+        mapping[idx].1
+    }
+
     pub fn parse<P: AsRef<Path>>(
         path: PathBuf,
         root_path: Option<P>,
@@ -388,47 +405,63 @@ impl File {
         // Set of files that need to be parsed based on OnChange targets seen in this file.
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
 
-        let f = std::fs::File::open(path.as_path())?;
-        let reader = std::io::BufReader::new(f);
+        let mut f = std::fs::File::open(path.as_path())?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf)?;
+
+        // Build a mapping from byte position to line number.
+        let byte_pos_to_line_mapping = Self::build_byte_pos_to_line_mapping(&buf);
 
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
         let mut block_stack: Vec<OnChangeBlock> = Vec::new();
         let mut block_name_to_start_line: HashMap<String, usize> = HashMap::new();
 
-        for (line_num, line) in reader.lines().enumerate() {
-            let line = match line {
-                Ok(l) => l,
-                Err(e) => {
-                    // TODO(aksiksi): We can probably do something cleaner here.
-                    eprintln!("Error reading lines from {}: {}", path.display(), e);
-                    return Ok((File { path, blocks }, files_to_parse));
+        // Build set of line matches based on byte position in the file.
+        let mut matches: Vec<LineMatch> = Vec::new();
+        if let Some(captures) = Self::try_find_on_change_captures(&buf) {
+            for c in captures {
+                if let Some(m) = c.name(ON_CHANGE_GROUP) {
+                    matches.push(LineMatch::OnChange(m.start(), m.as_bytes()));
+                } else if let Some(m) = c.name(THEN_CHANGE_GROUP) {
+                    matches.push(LineMatch::ThenChange(m.start(), m.as_bytes()));
                 }
-            };
-            let line_num = line_num + 1;
-            if let Some(parsed) = Self::try_parse_on_change_line(&line) {
-                Self::handle_on_change(
-                    path_ref.clone(),
-                    parsed,
-                    line_num,
-                    &mut block_name_to_start_line,
-                    &mut block_stack,
-                )?;
-            } else if let Some(parsed) = Self::try_parse_then_change_line(&line) {
-                let block = Self::handle_then_change(
-                    &path,
-                    root_path.as_deref(),
-                    &parsed,
-                    line_num,
-                    &mut files_to_parse,
-                    &mut block_stack,
-                )?;
-                blocks.push(block);
+            }
+        }
+
+        // Sort matches by byte position. This ensures that we get a correct order for OnChange
+        // and ThenChange blocks in the file.
+        matches.sort_by(|m1, m2| m1.pos().cmp(&m2.pos()));
+
+        for m in matches {
+            let line_num = Self::byte_to_line(&byte_pos_to_line_mapping, m.pos());
+            let parsed = std::str::from_utf8(m.data()).unwrap();
+            match m {
+                LineMatch::OnChange(..) => {
+                    Self::handle_on_change(
+                        path_ref.clone(),
+                        parsed,
+                        line_num,
+                        &mut block_name_to_start_line,
+                        &mut block_stack,
+                    )?;
+                }
+                LineMatch::ThenChange(..) => {
+                    let block = Self::handle_then_change(
+                        &path,
+                        root_path.as_deref(),
+                        &parsed,
+                        line_num,
+                        &mut files_to_parse,
+                        &mut block_stack,
+                    )?;
+                    blocks.push(block);
+                }
             }
         }
 
         if block_stack.len() > 0 {
             // We've hit EOF with an unclosed OnChange block.
-            let block = block_stack.last_mut().unwrap();
+            let block = block_stack.last().unwrap();
             return Err(anyhow::anyhow!(
                 "reached end of file {} while looking for ThenChange for block \"{}\" which started on line {}",
                 path.display(),
