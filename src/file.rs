@@ -11,8 +11,8 @@ use crate::git::{Hunk, Line};
 
 thread_local! {
     // TODO(aksiksi): Clean these patterns up by making them more specific.
-    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*LINT\.OnChange\((.*)\).*$").unwrap());
-    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r".*LINT\.ThenChange\((.*)\).*$").unwrap());
+    static ON_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r"LINT\.OnChange\((.*)\).*$").unwrap());
+    static THEN_CHANGE_PAT: OnceCell<Regex> = OnceCell::from(Regex::new(r"LINT\.ThenChange\((.*)\).*$").unwrap());
 }
 
 #[derive(Clone, Debug)]
@@ -280,23 +280,45 @@ impl File {
         Ok(ThenChange::BlockTarget(then_change_targets))
     }
 
-    fn try_parse_on_change_line(line: &str) -> Option<String> {
-        match ON_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line)) {
-            None => None,
-            Some(captures) => Some(String::from(captures.get(1).unwrap().as_str().trim())),
+    fn try_parse_on_change_line(line: &str) -> Option<&str> {
+        if !ON_CHANGE_PAT.with(|c| c.get().unwrap().is_match(line)) {
+            None
+        } else {
+            let s = ON_CHANGE_PAT.with(|c| {
+                c.get()
+                    .unwrap()
+                    .captures(&line)
+                    .unwrap()
+                    .get(1)
+                    .unwrap()
+                    .as_str()
+                    .trim()
+            });
+            Some(s)
         }
     }
 
-    fn try_parse_then_change_line(line: &str) -> Option<String> {
-        match THEN_CHANGE_PAT.with(|c| c.get().unwrap().captures(&line)) {
-            None => None,
-            Some(captures) => Some(String::from(captures.get(1).unwrap().as_str().trim())),
+    fn try_parse_then_change_line(line: &str) -> Option<&str> {
+        if !THEN_CHANGE_PAT.with(|c| c.get().unwrap().is_match(line)) {
+            None
+        } else {
+            let s = THEN_CHANGE_PAT.with(|c| {
+                c.get()
+                    .unwrap()
+                    .captures(&line)
+                    .unwrap()
+                    .get(1)
+                    .unwrap()
+                    .as_str()
+                    .trim()
+            });
+            Some(s)
         }
     }
 
     fn handle_on_change(
         file: Arc<PathBuf>,
-        parsed: String,
+        parsed: &str,
         line_num: usize,
         block_name_to_start_line: &mut HashMap<String, usize>,
         block_stack: &mut Vec<OnChangeBlock>,
@@ -309,7 +331,7 @@ impl File {
         };
 
         // Check for a duplicate block in the file.
-        if let Some(block_name) = &block_name {
+        if let Some(block_name) = block_name {
             if block_name_to_start_line.contains_key(block_name) {
                 return Err(anyhow::anyhow!(
                     "duplicate block name \"{}\" found on lines {} and {} of {}",
@@ -319,12 +341,12 @@ impl File {
                     file.display(),
                 ));
             }
-            block_name_to_start_line.insert(block_name.clone(), line_num);
+            block_name_to_start_line.insert(block_name.to_string(), line_num);
         }
 
         block_stack.push(OnChangeBlock {
             file,
-            name: block_name,
+            name: block_name.map(|s| s.to_string()),
             start_line: line_num as u32,
             end_line: 0,
             then_change: ThenChange::Unset,
@@ -345,9 +367,9 @@ impl File {
             block
         } else {
             return Err(anyhow::anyhow!(
-                r#"found ThenChange on line {} in "{}" with no matching OnChange"#,
-                line_num,
+                r#"found ThenChange "{}:{}" with no matching OnChange"#,
                 path.display(),
+                line_num,
             ));
         };
         block.end_line = line_num as u32;

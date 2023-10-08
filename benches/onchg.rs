@@ -42,7 +42,8 @@ pub fn directory(c: &mut Criterion) {
         b.iter(|| {
             let mut cmd = std::process::Command::new("grep");
             cmd.current_dir(d.path())
-                .args(&["-rE", "LINT.OnChange|LINT.ThenChange", "."])
+                // This pattern simulates what onchg is looking for on each line.
+                .args(&["-rE", "LINT.OnChange(.*).*$|LINT.ThenChange(.*).*$", "."])
                 .stdout(std::process::Stdio::null());
             cmd.spawn().unwrap().wait().unwrap();
         });
