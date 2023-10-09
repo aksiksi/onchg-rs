@@ -4,6 +4,8 @@ use clap::Parser as CliParser;
 
 use onchg::Parser;
 
+const DEFAULT_MAX_FILES_TO_DISPLAY: usize = 50;
+
 fn default_path() -> PathBuf {
     PathBuf::from(".")
 }
@@ -41,6 +43,9 @@ struct Cli {
 
     #[clap(short, long)]
     verbose: bool,
+
+    #[clap(long, default_value_t = DEFAULT_MAX_FILES_TO_DISPLAY)]
+    max_files_to_display: usize,
 }
 
 fn main() {
@@ -64,12 +69,22 @@ fn main() {
     println!("Root path: {}\n", parser.root_path().display());
 
     if files.len() != 0 {
-        println!("Files parsed:");
-        for f in files {
+        println!(
+            "Parsed {} files ({} blocks total):",
+            files.len(),
+            parser.num_blocks(),
+        );
+        for f in files.iter().take(DEFAULT_MAX_FILES_TO_DISPLAY) {
             println!("  * {}", f.display());
         }
-    } else {
-        println!("No staged files to check");
+        if files.len() > DEFAULT_MAX_FILES_TO_DISPLAY {
+            println!(
+                "  ... {} files omitted",
+                files.len() - DEFAULT_MAX_FILES_TO_DISPLAY,
+            );
+        }
+    } else if let Mode::Repo { .. } = cli.mode {
+        println!("No staged files to check.");
         return;
     }
 
@@ -80,6 +95,7 @@ fn main() {
             let violations = parser.validate_git_repo();
             if let Err(e) = &violations {
                 eprintln!("Failed to validate Git repo state: {}", e);
+                std::process::exit(1);
             }
             let violations = violations.unwrap();
             if violations.len() != 0 {
@@ -87,8 +103,8 @@ fn main() {
                 for v in violations {
                     println!("  * {}", v.to_string());
                 }
+                std::process::exit(1);
             }
-            std::process::exit(1);
         }
         _ => (),
     };

@@ -257,6 +257,10 @@ impl Parser {
     pub fn root_path(&self) -> &Path {
         &self.root_path
     }
+
+    pub fn num_blocks(&self) -> usize {
+        self.num_blocks
+    }
 }
 
 #[derive(Debug)]

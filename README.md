@@ -60,10 +60,9 @@ Run `onchg` on the directory:
 
 ```
 $ onchg directory
-
 Root path: /home/aksiksi/onchg/quickstart
 
-Files parsed:
+Parsed 2 files (2 blocks total):
   * /home/aksiksi/onchg/quickstart/docs.md
   * /home/aksiksi/onchg/quickstart/header.h
 
@@ -83,7 +82,7 @@ Run `onchg` in repo mode:
 $ onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
-Files parsed:
+Parsed 2 files (2 blocks total):
   * /home/aksiksi/onchg/quickstart/docs.md
   * /home/aksiksi/onchg/quickstart/header.h
 
@@ -97,7 +96,7 @@ Stage `header.h` and re-run:
 $ onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
-Files parsed:
+Parsed 2 files (2 blocks total):
   * /home/aksiksi/onchg/quickstart/docs.md
   * /home/aksiksi/onchg/quickstart/header.h
 
