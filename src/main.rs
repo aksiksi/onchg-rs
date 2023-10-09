@@ -18,7 +18,7 @@ enum Mode {
     /// targets in the staged file(s) are also staged. Unlike in "directory"
     /// mode, ignore files are _not_ checked.
     Repo {
-        #[clap(required = false, default_value = default_path().into_os_string())]
+        #[arg(required = false, default_value = default_path().into_os_string())]
         path: PathBuf,
     },
     /// Check all files in a directory. By default, this will skip parsing any files
@@ -26,11 +26,11 @@ enum Mode {
     ///
     /// See the [ignore] crate for more details.
     Directory {
-        #[clap(required = false, default_value = default_path().into_os_string())]
+        #[arg(required = false, default_value = default_path().into_os_string())]
         path: PathBuf,
 
         /// Do not adhere to Git ignore files.
-        #[clap(long, default_value_t = false)]
+        #[arg(long, default_value_t = false)]
         no_ignore: bool,
     },
 }
@@ -41,11 +41,15 @@ struct Cli {
     #[clap(subcommand)]
     mode: Mode,
 
-    #[clap(short, long)]
+    #[arg(short, long)]
     verbose: bool,
 
-    #[clap(long, default_value_t = DEFAULT_MAX_FILES_TO_DISPLAY)]
+    #[arg(long, default_value_t = DEFAULT_MAX_FILES_TO_DISPLAY, global = true)]
     max_files_to_display: usize,
+
+    /// Do not log anything to stdout.
+    #[arg(short, long, global = true)]
+    quiet: bool,
 }
 
 fn main() {
@@ -66,26 +70,30 @@ fn main() {
     let mut files: Vec<&Path> = parser.paths().collect();
     files.sort();
 
-    println!("Root path: {}\n", parser.root_path().display());
+    if !cli.quiet {
+        println!("Root path: {}\n", parser.root_path().display());
+    }
 
-    if files.len() != 0 {
-        println!(
-            "Parsed {} files ({} blocks total):",
-            files.len(),
-            parser.num_blocks(),
-        );
-        for f in files.iter().take(DEFAULT_MAX_FILES_TO_DISPLAY) {
-            println!("  * {}", f.display());
-        }
-        if files.len() > DEFAULT_MAX_FILES_TO_DISPLAY {
+    if !cli.quiet {
+        if files.len() != 0 {
             println!(
-                "  ... {} files omitted",
-                files.len() - DEFAULT_MAX_FILES_TO_DISPLAY,
+                "Parsed {} files ({} blocks total):",
+                files.len(),
+                parser.num_blocks(),
             );
+            for f in files.iter().take(DEFAULT_MAX_FILES_TO_DISPLAY) {
+                println!("  * {}", f.display());
+            }
+            if files.len() > DEFAULT_MAX_FILES_TO_DISPLAY {
+                println!(
+                    "  ... {} files omitted",
+                    files.len() - DEFAULT_MAX_FILES_TO_DISPLAY,
+                );
+            }
+        } else if let Mode::Repo { .. } = cli.mode {
+            println!("No staged files to check.");
+            return;
         }
-    } else if let Mode::Repo { .. } = cli.mode {
-        println!("No staged files to check.");
-        return;
     }
 
     println!();
@@ -99,9 +107,9 @@ fn main() {
             }
             let violations = violations.unwrap();
             if violations.len() != 0 {
-                println!("Violations:");
+                eprintln!("Violations:");
                 for v in violations {
-                    println!("  * {}", v.to_string());
+                    eprintln!("  * {}", v.to_string());
                 }
                 std::process::exit(1);
             }
@@ -109,5 +117,7 @@ fn main() {
         _ => (),
     };
 
-    println!("OK.");
+    if !cli.quiet {
+        println!("OK.");
+    }
 }
