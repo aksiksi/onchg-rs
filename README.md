@@ -43,7 +43,7 @@ EOL
 cat >header.h <<EOL
 
 <!-- LINT.OnChange(supported-services) -->
-type _supported_services_t enum {
+typedef enum {
     INVALID = 0;
     MAIN = 1;
     PRIMARY = 2;
