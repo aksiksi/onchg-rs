@@ -1014,4 +1014,39 @@ mod test {
         ]);
         parse_and_validate(d.path(), 0);
     }
+
+    #[test]
+    fn test_from_git_repo_single_line_block() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n aaa LINT.ThenChange(f2.txt:first)\n",
+            ),
+            (
+                "f2.txt",
+                indoc! {"
+                    LINT.OnChange(first)\n
+                    LINT.ThenChange(f1.txt:default)\n
+                "},
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Delete one character in f1:default and stage it.
+        d.write_and_add_files(&[(
+            "f1.txt",
+            "LINT.OnChange(default)\n aa LINT.ThenChange(f2.txt:first)\n",
+        )]);
+        parse_and_validate(d.path(), 1);
+
+        d.write_and_add_files(&[(
+            "f2.txt",
+            indoc! {"
+                LINT.OnChange(first)\n
+                aaaaaa
+                LINT.ThenChange(f1.txt:default)\n
+            "},
+        )]);
+        parse_and_validate(d.path(), 0);
+    }
 }
