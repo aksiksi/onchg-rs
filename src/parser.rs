@@ -274,21 +274,21 @@ impl<'a> ToString for OnChangeViolation<'a> {
     fn to_string(&self) -> String {
         if let Some(target_block) = self.target_block {
             format!(
-                r#"block "{}" in staged file at "{}:{}" has changed, but its OnChange target block "{}" at "{}:{}" has not"#,
-                self.block.name(),
-                self.block.file().display(),
-                self.block.start_line(),
+                r#"block "{}" at {}:{} (due to block "{}" at {}:{})"#,
                 target_block.name(),
                 self.target_file.display(),
                 target_block.start_line(),
-            )
-        } else {
-            format!(
-                r#"block "{}" in staged file "{}:{}" has changed, but its OnChange target file "{}" has not"#,
                 self.block.name(),
                 self.block.file().display(),
                 self.block.start_line(),
+            )
+        } else {
+            format!(
+                r#"file "{}" (due to block "{}" at {}:{})"#,
                 self.target_file.display(),
+                self.block.name(),
+                self.block.file().display(),
+                self.block.start_line(),
             )
         }
     }
