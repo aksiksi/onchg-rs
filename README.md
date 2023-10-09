@@ -4,6 +4,102 @@
 
 A tool that allows you to keep blocks in sync across different files in your codebase.
 
+## Install
+
+```
+cargo install onchg
+```
+
+## Tutorial
+
+Create an empty directory:
+
+```
+mkdir -p ~/onchg/quickstart && cd ~/onchg/quickstart
+```
+
+Create two files - `docs.md` and `header.h`:
+
+**`docs.md`**:
+
+```
+cat >docs.md <<EOL
+# Docs
+
+## Support Services
+
+<!-- LINT.OnChange(supported-services) -->
+* Main
+* Primary
+* Other
+<!-- LINT.ThenChange(header.h:supported-services) -->
+
+EOL
+```
+
+**`header.h`**:
+
+```
+cat >header.h <<EOL
+
+<!-- LINT.OnChange(supported-services) -->
+type _supported_services_t enum {
+    INVALID = 0;
+    MAIN = 1;
+    PRIMARY = 2;
+} supported_services_t;
+<!-- LINT.ThenChange(docs.md:supported-services) -->
+
+EOL
+```
+
+Run `onchg` on the directory:
+
+```
+$ onchg directory .
+
+Root path: /home/aksiksi/onchg/quickstart
+
+Files parsed:
+  * /home/aksiksi/onchg/quickstart/docs.md
+  * /home/aksiksi/onchg/quickstart/header.h
+
+OK.
+```
+
+Create a Git repo and stage `docs.md`:
+
+```
+git init .
+git add docs.md
+```
+
+Run `onchg` in repo mode:
+
+```
+$ onchg repo .
+Root path: /home/aksiksi/onchg/quickstart
+
+Files parsed:
+  * /home/aksiksi/onchg/quickstart/docs.md
+  * /home/aksiksi/onchg/quickstart/header.h
+
+Violations:
+  * block "supported-services" in staged file at "/home/aksiksi/onchg/quickstart/docs.md:5" has changed, but its OnChange target block "supported-services" at "/home/aksiksi/onchg/quickstart/header.h:2" has not
+```
+
+Stage `header.h` and re-run:
+
+```
+Root path: /home/aksiksi/onchg/quickstart
+
+Files parsed:
+  * /home/aksiksi/onchg/quickstart/docs.md
+  * /home/aksiksi/onchg/quickstart/header.h
+
+OK.
+```
+
 ## Benchmarks
 
 **Setup:** 10 core VM; AMD 3900x equivalent.
@@ -28,10 +124,14 @@ When compared to `grep`, in addition to finding matches in all files, `onchg` ne
 ~2x slower than `grep`:
 
 ```
-directory-sparse/150    time:   [2.9138 ms 2.9558 ms 3.0050 ms]
-grep-sparse/150         time:   [1.7046 ms 1.7171 ms 1.7302 ms]
-directory-sparse/1000   time:   [17.084 ms 17.294 ms 17.527 ms]
-grep-sparse/1000        time:   [7.3685 ms 7.4982 ms 7.6338 ms]
+
+directory-sparse/150    time:   [2.8788 ms 2.9122 ms 2.9564 ms]
+grep-sparse/150         time:   [1.6747 ms 1.6905 ms 1.7096 ms]
+ripgrep-sparse/150      time:   [5.1610 ms 5.1990 ms 5.2374 ms]
+
+directory-sparse/1000   time:   [17.001 ms 17.183 ms 17.383 ms]
+grep-sparse/1000        time:   [6.7350 ms 6.8130 ms 6.8944 ms]
+ripgrep-sparse/1000     time:   [7.9359 ms 8.0190 ms 8.1125 ms]
 ```
 
 ### Dense
@@ -41,11 +141,14 @@ grep-sparse/1000        time:   [7.3685 ms 7.4982 ms 7.6338 ms]
 
 50-100 blocks per file. Same line count and line length settings as sparse bench.
 
-5-10x slower than `grep`.
+5-10x slower than `grep`:
 
 ```
-directory-dense/150     time:   [15.027 ms 15.239 ms 15.464 ms]
-grep-dense/150          time:   [3.4964 ms 3.5651 ms 3.6428 ms]
-directory-dense/1000    time:   [113.08 ms 114.64 ms 116.32 ms]
-grep-dense/1000         time:   [17.259 ms 17.401 ms 17.548 ms]
+directory-dense/150     time:   [14.406 ms 14.556 ms 14.725 ms]
+grep-dense/150          time:   [3.4290 ms 3.4814 ms 3.5367 ms]
+ripgrep-dense/150       time:   [7.3262 ms 7.3873 ms 7.4505 ms]
+
+directory-dense/1000    time:   [108.37 ms 109.40 ms 110.57 ms]
+grep-dense/1000         time:   [17.434 ms 17.549 ms 17.666 ms]
+ripgrep-dense/1000      time:   [18.363 ms 18.517 ms 18.670 ms]
 ```

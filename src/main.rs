@@ -74,17 +74,16 @@ fn main() {
                 eprintln!("Failed to validate Git repo state: {}", e);
             }
             let violations = violations.unwrap();
-            if violations.len() == 0 {
-                println!("OK.");
-                return;
-            } else {
+            if violations.len() != 0 {
                 println!("Violations:");
-            }
-            for v in violations {
-                println!("  * {}", v.to_string());
+                for v in violations {
+                    println!("  * {}", v.to_string());
+                }
             }
             std::process::exit(1);
         }
         _ => (),
-    }
+    };
+
+    println!("OK.");
 }
