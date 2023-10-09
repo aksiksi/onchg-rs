@@ -56,7 +56,7 @@ EOL
 Run `onchg` on the directory:
 
 ```
-$ onchg directory .
+$ onchg directory
 
 Root path: /home/aksiksi/onchg/quickstart
 
@@ -77,7 +77,7 @@ git add docs.md
 Run `onchg` in repo mode:
 
 ```
-$ onchg repo .
+$ onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
 Files parsed:
@@ -91,6 +91,7 @@ Violations:
 Stage `header.h` and re-run:
 
 ```
+$ onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
 Files parsed:

@@ -4,6 +4,10 @@ use clap::Parser as CliParser;
 
 use onchg::Parser;
 
+fn default_path() -> PathBuf {
+    PathBuf::from(".")
+}
+
 #[derive(clap::Parser, Clone, Debug)]
 enum Mode {
     /// Validate changes to staged files in a Git repo.
@@ -11,12 +15,16 @@ enum Mode {
     /// This looks at any staged file(s) and ensures that all block
     /// targets in the staged file(s) are also staged. Unlike in "directory"
     /// mode, ignore files are _not_ checked.
-    Repo { path: PathBuf },
+    Repo {
+        #[clap(required = false, default_value = default_path().into_os_string())]
+        path: PathBuf,
+    },
     /// Check all files in a directory. By default, this will skip parsing any files
     /// specified in the various ignore files.
     ///
     /// See the [ignore] crate for more details.
     Directory {
+        #[clap(required = false, default_value = default_path().into_os_string())]
         path: PathBuf,
 
         /// Do not adhere to Git ignore files.
