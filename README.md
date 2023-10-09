@@ -1,6 +1,9 @@
 # onchg
 
+[![Crates.io](https://img.shields.io/crates/v/onchg)](https://crates.io/crates/onchg)
+[![docs.rs](https://img.shields.io/docsrs/onchg?label=docs.rs)](https://docs.rs/onchg/)
 [![codecov](https://codecov.io/gh/aksiksi/onchg-rs/graph/badge.svg?token=CGR9Q13W9Q)](https://codecov.io/gh/aksiksi/onchg-rs)
+[![test](https://github.com/aksiksi/onchg-rs/actions/workflows/test.yml/badge.svg)](https://github.com/aksiksi/onchg-rs/actions/workflows/test.yml)
 
 A tool that allows you to keep blocks in sync across different files in your codebase.
 
@@ -26,7 +29,7 @@ Create two files - `docs.md` and `header.h`:
 cat >docs.md <<EOL
 # Docs
 
-## Support Services
+## Supported Services
 
 <!-- LINT.OnChange(supported-services) -->
 * Main
