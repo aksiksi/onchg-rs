@@ -3,7 +3,7 @@ all: test fmt
 check:
 	cargo check
 
-benches:
+bench:
 	cargo bench
 
 build: check

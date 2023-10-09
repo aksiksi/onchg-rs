@@ -7,7 +7,7 @@ const SEED: u64 = 456;
 
 pub fn directory_sparse(c: &mut Criterion) {
     let d = TestDir::new();
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 0, 10, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 0, 10, 100, 100);
     let (num_directories, num_files) = (20, 150);
     f.init(num_directories, num_files);
 
@@ -33,7 +33,7 @@ pub fn directory_sparse(c: &mut Criterion) {
     drop(d);
 
     let d = TestDir::new();
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 0, 10, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 0, 10, 100, 100);
     let (num_directories, num_files) = (100, 1000);
     f.init(num_directories, num_files);
 
@@ -59,7 +59,7 @@ pub fn directory_sparse(c: &mut Criterion) {
 
 pub fn directory_dense(c: &mut Criterion) {
     let d = TestDir::new();
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 50, 100, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 50, 100, 100, 100);
     let (num_directories, num_files) = (20, 150);
     f.init(num_directories, num_files);
 
@@ -85,7 +85,7 @@ pub fn directory_dense(c: &mut Criterion) {
     drop(d);
 
     let d = TestDir::new();
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 50, 100, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), SEED, 5, 50, 100, 100, 100);
     let (num_directories, num_files) = (100, 1000);
     f.init(num_directories, num_files);
 

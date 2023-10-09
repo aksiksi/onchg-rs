@@ -13,7 +13,7 @@ fn test_directory() {
     let s = std::time::Instant::now();
 
     // Setup some fake directories and files.
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 10, 100, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 10, 100, 100, 100);
     f.init(20, 150);
 
     eprintln!(
@@ -41,7 +41,7 @@ fn test_git_repo() {
     let s = std::time::Instant::now();
 
     // Setup some fake directories and files.
-    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 10, 100, 100);
+    let mut f = RandomOnChangeTree::new(d.path().to_owned(), 123, 5, 10, 100, 100, 100);
     f.init(20, 150);
 
     d.add_all_files();

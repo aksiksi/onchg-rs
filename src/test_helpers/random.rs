@@ -16,6 +16,7 @@ pub struct RandomOnChangeTree {
     min_blocks_per_file: usize,
     max_blocks_per_file: usize,
     max_lines_per_block: usize,
+    max_file_line_length: usize,
 }
 
 impl RandomOnChangeTree {
@@ -26,6 +27,7 @@ impl RandomOnChangeTree {
         min_blocks_per_file: usize,
         max_blocks_per_file: usize,
         max_lines_per_block: usize,
+        max_file_line_length: usize,
     ) -> Self {
         let mut raw_seed = [0u8; 32];
         raw_seed[0..8].copy_from_slice(&seed.to_le_bytes());
@@ -44,6 +46,7 @@ impl RandomOnChangeTree {
             min_blocks_per_file,
             max_blocks_per_file,
             max_lines_per_block,
+            max_file_line_length,
         }
     }
 
@@ -56,9 +59,21 @@ impl RandomOnChangeTree {
         }
     }
 
-    fn rand_string(&mut self) -> String {
-        let s = self.b64.encode(self.rng.next_u64().to_le_bytes());
-        String::from(&s[..s.len() - 1])
+    fn next_string(&mut self) -> String {
+        let mut s = self.b64.encode(self.rng.next_u64().to_le_bytes());
+        s.truncate(s.len() - 1);
+        s
+    }
+
+    fn rand_string(&mut self, len: Option<usize>) -> String {
+        let mut s = self.next_string();
+        if let Some(len) = len {
+            while s.len() < len {
+                s.push_str(&self.next_string());
+            }
+            s.truncate(len);
+        }
+        s
     }
 
     fn rand_le(&mut self, max: usize) -> usize {
@@ -98,7 +113,7 @@ impl RandomOnChangeTree {
 
         let parts = (0..depth)
             .into_iter()
-            .map(|_| self.rand_string())
+            .map(|_| self.rand_string(None))
             .collect::<Vec<String>>();
         let mut p = PathBuf::from_iter(parts.into_iter());
 
@@ -115,7 +130,7 @@ impl RandomOnChangeTree {
 
     fn create_file(&mut self) {
         let n = self.rand_le(self.directories.len());
-        let file_name = format!("{}.file", self.rand_string());
+        let file_name = format!("{}.file", self.rand_string(None));
         let d = &self.directories[n];
         let path = d.join(file_name);
         let mut f = std::fs::File::create(&path).unwrap();
@@ -163,12 +178,14 @@ impl RandomOnChangeTree {
     fn create_blocks(&mut self, path: PathBuf, f: &mut std::fs::File) -> Vec<OnChangeBlock> {
         let mut blocks: Vec<OnChangeBlock> = Vec::new();
 
+        let mut content = String::new();
+
         let num_blocks = self.rand_in_range(self.min_blocks_per_file, self.max_blocks_per_file + 1);
         let mut line_num = 0;
         for _ in 0..num_blocks {
             let num_lines = self.rand_le(self.max_lines_per_block);
             let block_name = if self.rand_bool() {
-                Some(self.rand_string())
+                Some(self.rand_string(None))
             } else {
                 None
             };
@@ -219,17 +236,21 @@ impl RandomOnChangeTree {
 
             let (on_change_string, then_change_string) = Self::block_to_strings(&block);
 
-            f.write(on_change_string.as_bytes()).unwrap();
+            content.push_str(&on_change_string);
             for _ in 0..num_lines {
-                // Write a bunch of empty lines.
-                f.write("\n".as_bytes()).unwrap();
+                let n = self.rand_le(self.max_file_line_length);
+                let line_content = self.rand_string(Some(n));
+                content.push_str(&line_content);
+                content.push('\n');
             }
-            f.write(then_change_string.as_bytes()).unwrap();
+            content.push_str(&then_change_string);
 
             blocks.push(block);
 
             line_num += num_lines + 1;
         }
+
+        f.write(content.as_bytes()).unwrap();
 
         blocks
     }
