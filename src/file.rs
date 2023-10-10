@@ -188,58 +188,102 @@ impl<'a> LineMatch<'a> {
 
 #[derive(Debug)]
 pub struct File {
+    /// Relative path to the file. This allows us to be agnostic of the root path.
     pub(crate) path: PathBuf,
+    /// List of parsed blocks in the file.
     pub(crate) blocks: Vec<OnChangeBlock>,
 }
 
 impl File {
+    /// Parse the file path specified in the ThenChange and convert it into a useable path
+    /// that is _relative_ to the provided root path.
+    ///
+    /// Supported cases:
+    ///
+    /// 1. Bare filename (e.g., hello.txt): File is in the _same_ directory as the origin file
+    /// 2. Relative path: Path is relative to the origin file
+    /// 3. //-prefixed path (Bazel convention): Path is relative to the root directory
+    ///
+    ///
+    /// Relatives path support . and .. prefixes. ".."s must only exist in the prefix of the path.
+    /// For example: ../../../abc is supported, but ../a/b/../c is not.
+    ///
+    //// Absolute paths are not supported as they do not make sense in repo mode.
+    ///
+    /// Examples of each for a file located at "abc/abc.txt" (relative to root):
+    ///
+    /// 1. ThenChange(hello.txt:abc): Path is "abc/hello.txt"
+    /// 2. ThenChange(def/def.txt:def): Path is "abc/def/def.txt"
+    /// 3. ThenChange(//hello.txt:hello): Path is "hello.txt"
     fn parse_then_target_file_path(
-        line_num: usize,
         path: &Path,
-        root_path: Option<&Path>,
+        root_path: &Path,
         then_change_target: &str,
+        line_num: usize,
     ) -> Result<PathBuf> {
-        let mut file_path = PathBuf::from(then_change_target);
+        let raw_path_str = then_change_target;
+        let mut raw_path = Path::new(raw_path_str);
 
-        if !file_path.exists() {
-            let root_with_path = if let Some(root_path) = root_path {
-                if root_path.exists() {
-                    Some(root_path.join(&file_path))
-                } else {
-                    None
+        let file_path: PathBuf;
+        if raw_path.is_relative() {
+            let mut parent = path.parent().expect("path should have a parent");
+
+            // Case 1 if this is false.
+            // Case 2 otherwise.
+            if parent != raw_path.parent().unwrap() {
+                // Strip any . or .. prefixes from the target path.
+                for p in raw_path.components() {
+                    match p {
+                        std::path::Component::Normal(_) => break,
+                        std::path::Component::CurDir => {
+                            raw_path = raw_path.strip_prefix("./").unwrap();
+                        }
+                        std::path::Component::ParentDir => {
+                            parent = parent.parent().expect("path should have a parent");
+                            raw_path = raw_path.strip_prefix("../").unwrap();
+                        }
+                        std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                            unreachable!("this is a relative path")
+                        }
+                    }
                 }
-            } else {
-                None
-            };
-            let relative_path = path.parent().unwrap().join(&file_path);
-
-            // Always prioritize the relative path case (i.e., targets in the same directory).
-            if relative_path.exists() {
-                file_path = relative_path;
-            } else if root_with_path.is_some() && root_with_path.as_ref().unwrap().exists() {
-                file_path = root_with_path.unwrap();
-            } else {
-                return Err(anyhow::anyhow!(
-                    r#"OnChange target file "{}" on line {} does not exist"#,
-                    file_path.display(),
-                    line_num
-                ));
             }
+
+            file_path = parent.join(raw_path);
+        } else if raw_path_str.starts_with("//") {
+            // Case 3.
+            file_path = PathBuf::from(raw_path_str.strip_prefix("//").unwrap());
+        } else {
+            return Err(anyhow::anyhow!(
+                r#"ThenChange target file "{}" at {}:{} is invalid"#,
+                raw_path.display(),
+                path.display(),
+                line_num,
+            ));
         }
 
-        Ok(file_path.canonicalize().unwrap())
+        if !root_path.join(&file_path).exists() {
+            return Err(anyhow::anyhow!(
+                r#"ThenChange target file "{}" at {}:{} does not exist"#,
+                file_path.display(),
+                path.display(),
+                line_num,
+            ));
+        }
+
+        Ok(file_path)
     }
 
     fn parse_single_then_change_target(
-        line_num: usize,
         path: &Path,
-        root_path: Option<&Path>,
+        root_path: &Path,
         then_change_target: &str,
+        line_num: usize,
     ) -> Result<ThenChangeTarget> {
         let split_target: Vec<&str> = then_change_target.split(":").collect();
         if split_target.len() < 2 {
             return Err(anyhow::anyhow!(
-                "invalid ThenChange target on line {}: {}",
+                "invalid ThenChange target on line {}: \"{}\"",
                 line_num,
                 then_change_target
             ));
@@ -255,7 +299,7 @@ impl File {
 
         // Block target in another file.
         let file_path =
-            Self::parse_then_target_file_path(line_num, path, root_path, split_target[0])?;
+            Self::parse_then_target_file_path(path, root_path, split_target[0], line_num)?;
 
         Ok(ThenChangeTarget {
             block: block_name.to_string(),
@@ -264,11 +308,11 @@ impl File {
     }
 
     fn build_then_change(
+        path: &Path,
+        root_path: &Path,
+        then_change_target: &str,
         files_to_parse: &mut HashSet<PathBuf>,
         line_num: usize,
-        path: &Path,
-        root_path: Option<&Path>,
-        then_change_target: &str,
     ) -> Result<ThenChange> {
         let then_change_target = then_change_target.trim();
         if then_change_target.is_empty() {
@@ -277,7 +321,7 @@ impl File {
         if !then_change_target.contains(":") {
             // Try to parse as just a file target.
             let file_path =
-                Self::parse_then_target_file_path(line_num, path, root_path, then_change_target)?;
+                Self::parse_then_target_file_path(path, root_path, then_change_target, line_num)?;
             files_to_parse.insert(file_path.clone());
             return Ok(ThenChange::FileTarget(file_path));
         }
@@ -294,7 +338,7 @@ impl File {
 
         for target in split_by_comma {
             let target = target.trim();
-            let t = Self::parse_single_then_change_target(line_num, path, root_path, target)?;
+            let t = Self::parse_single_then_change_target(path, root_path, target, line_num)?;
             if let Some(f) = &t.file {
                 files_to_parse.insert(f.clone());
             }
@@ -322,11 +366,12 @@ impl File {
         if let Some(block_name) = block_name {
             if block_name_to_start_line.contains_key(block_name) {
                 return Err(anyhow::anyhow!(
-                    "duplicate block name \"{}\" found on lines {} and {} of {}",
+                    "duplicate block name \"{}\" found on {}:{} and {}:{}",
                     block_name,
-                    block_name_to_start_line[block_name],
-                    line_num,
                     file.display(),
+                    block_name_to_start_line[block_name],
+                    file.display(),
+                    line_num,
                 ));
             }
             block_name_to_start_line.insert(block_name.to_string(), line_num);
@@ -345,7 +390,7 @@ impl File {
 
     fn handle_then_change(
         path: &Path,
-        root_path: Option<&Path>,
+        root_path: &Path,
         parsed: &str,
         line_num: usize,
         files_to_parse: &mut HashSet<PathBuf>,
@@ -355,14 +400,14 @@ impl File {
             block
         } else {
             return Err(anyhow::anyhow!(
-                r#"found ThenChange "{}:{}" with no matching OnChange"#,
+                r#"found ThenChange at "{}:{}" with no matching OnChange"#,
                 path.display(),
                 line_num,
             ));
         };
         block.end_line = line_num as u32;
         block.then_change =
-            Self::build_then_change(files_to_parse, line_num, &path, root_path, &parsed)?;
+            Self::build_then_change(path, root_path, &parsed, files_to_parse, line_num)?;
         Ok(block)
     }
 
@@ -389,6 +434,9 @@ impl File {
         v
     }
 
+    /// Convert a byte position to a line number.
+    /// This works by doing a binary search of the mapping slice and returning the
+    /// line number of the closest byte position.
     fn byte_to_line(mapping: &[(usize, usize)], byte_pos: usize) -> usize {
         let res = mapping.binary_search_by_key(&byte_pos, |(pos, _)| *pos);
         let idx = match res {
@@ -400,15 +448,17 @@ impl File {
 
     pub fn parse<P: AsRef<Path>>(
         path: PathBuf,
-        root_path: Option<P>,
+        root_path: P,
     ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
+        let root_path = root_path.as_ref();
         let path_ref = Arc::new(path.clone());
-        let root_path = root_path.map(|p| p.as_ref().canonicalize().unwrap());
 
         // Set of files that need to be parsed based on OnChange targets seen in this file.
         let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
 
-        let mut f = std::fs::File::open(path.as_path())?;
+        // Read the entire file into memory. Since we're mostly working with text files,
+        // this shouldn't be an issue.
+        let mut f = std::fs::File::open(root_path.join(path.as_path()))?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
 
@@ -438,12 +488,12 @@ impl File {
             return Ok(None);
         }
 
-        // Build a mapping from byte position to line number.
+        // Build a mapping from byte position in the file to line number.
         let byte_pos_to_line_mapping = Self::build_byte_pos_to_line_mapping(&buf);
 
         for m in matches {
             let line_num = Self::byte_to_line(&byte_pos_to_line_mapping, m.pos());
-            let parsed = std::str::from_utf8(m.data()).unwrap();
+            let parsed = std::str::from_utf8(m.data())?;
             match m {
                 LineMatch::OnChange(..) => {
                     Self::handle_on_change(
@@ -457,7 +507,7 @@ impl File {
                 LineMatch::ThenChange(..) => {
                     let block = Self::handle_then_change(
                         &path,
-                        root_path.as_deref(),
+                        root_path,
                         &parsed,
                         line_num,
                         &mut files_to_parse,

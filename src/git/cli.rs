@@ -8,21 +8,35 @@ use patch::Patch;
 use super::{Hunk, Line, Repo};
 
 // Returns the names of non-deleted staged files.
-const STAGED_FILES_CMD: &[&str] = &["diff", "--cached", "--name-only", "--diff-filter=d"];
+const STAGED_FILES_CMD: &[&str] = &[
+    "diff",
+    "--cached",
+    "--name-only",
+    // Render paths relative to pwd.
+    "--relative",
+    // Ignore deleted files.
+    "--diff-filter=d",
+];
 // Returns all staged hunks for non-deleted files.
-// --no-prefix omits the path prefix for the old and new files (a/ and b/, respectively).
-const STAGED_HUNKS_CMD: &[&str] = &["diff", "--cached", "--no-prefix", "--diff-filter=d"];
+const STAGED_HUNKS_CMD: &[&str] = &[
+    "diff",
+    "--cached",
+    // Render paths relative to pwd.
+    "--relative",
+    // Omits the path prefix for the old and new files (a/ and b/, respectively).
+    "--no-prefix",
+    // Ignore deleted files.
+    "--diff-filter=d",
+];
 
-pub struct Cli;
+pub struct Cli<'a> {
+    pub repo_path: &'a Path,
+}
 
-impl Repo for Cli {
-    fn get_staged_files(&self, repo_path: Option<&Path>) -> Result<(Vec<PathBuf>, PathBuf)> {
-        let repo_path = match repo_path {
-            Some(p) => p.to_owned(),
-            None => std::env::current_dir()?,
-        };
+impl<'a> Repo for Cli<'a> {
+    fn get_staged_files(&self) -> Result<Vec<PathBuf>> {
         let output = Command::new("git")
-            .current_dir(&repo_path)
+            .current_dir(self.repo_path)
             .args(STAGED_FILES_CMD)
             .output()?;
         let (stdout, stderr) = (
@@ -39,23 +53,23 @@ impl Repo for Cli {
             if p.is_empty() {
                 continue;
             }
-            let path = repo_path.join(Path::new(p)).canonicalize()?;
-            if !path.exists() {
-                return Err(anyhow::anyhow!("file {} does not exist", path.display()));
+            let p = Path::new(p);
+            let absolute = self.repo_path.join(p).canonicalize()?;
+            if !absolute.exists() {
+                return Err(anyhow::anyhow!(
+                    "file {} does not exist",
+                    absolute.display()
+                ));
             }
-            paths.push(path);
+            paths.push(p.to_owned());
         }
 
-        Ok((paths, repo_path))
+        Ok(paths)
     }
 
-    fn get_staged_hunks(&self, repo_path: Option<&Path>) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
-        let repo_path = match repo_path {
-            Some(p) => p.to_owned(),
-            None => std::env::current_dir()?,
-        };
+    fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
         let output = Command::new("git")
-            .current_dir(&repo_path)
+            .current_dir(self.repo_path)
             .args(STAGED_HUNKS_CMD)
             .output()?;
         let (raw_stdout, raw_stderr) = (output.stdout, output.stderr);
@@ -72,9 +86,7 @@ impl Repo for Cli {
         let patch = Patch::from_multiple(stdout).map_err(|e| anyhow::anyhow!("{}", e))?;
         for diff_file in patch {
             // We only look at the new file.
-            let path = repo_path
-                .join(Path::new(diff_file.new.path.as_ref()))
-                .canonicalize()?;
+            let path = PathBuf::from(diff_file.new.path.as_ref());
             let hunks = diff_file.hunks.iter().map(Hunk::from).collect();
             hunk_map.insert(path, hunks);
         }

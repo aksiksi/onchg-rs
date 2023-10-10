@@ -67,7 +67,7 @@ fn test_git_repo() {
         .current_dir(d.path())
         .assert()
         .failure()
-        .stdout(predicate::str::contains("but its OnChange target file"));
+        .stderr(predicate::str::contains("Violations:"));
 
     eprintln!("Parsed & validated staged files in {:?}", s.elapsed())
 }

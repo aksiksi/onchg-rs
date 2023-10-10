@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::path::PathBuf;
+use std::{io::Write, path::Path};
 
 use base64::Engine;
 use rand::{RngCore, SeedableRng};
@@ -115,15 +115,14 @@ impl RandomOnChangeTree {
             .into_iter()
             .map(|_| self.rand_string(None))
             .collect::<Vec<String>>();
-        let mut p = PathBuf::from_iter(parts.into_iter());
-
-        if let Some(parent) = parent {
-            p = parent.join(p);
+        let p = PathBuf::from_iter(parts.into_iter());
+        let p = if let Some(parent) = parent {
+            parent.join(p)
         } else {
-            p = self.root.join(p);
-        }
+            p
+        };
 
-        std::fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(self.root.join(&p)).unwrap();
 
         self.directories.push(p);
     }
@@ -133,19 +132,19 @@ impl RandomOnChangeTree {
         let file_name = format!("{}.file", self.rand_string(None));
         let d = &self.directories[n];
         let path = d.join(file_name);
-        let mut f = std::fs::File::create(&path).unwrap();
+        let mut f = std::fs::File::create(self.root.join(&path)).unwrap();
         let blocks = self.create_blocks(path.clone(), &mut f);
         for block in blocks {
             self.blocks.push((path.clone(), block));
         }
     }
 
-    fn targetable_blocks(&self) -> Vec<(&PathBuf, &OnChangeBlock)> {
+    fn targetable_blocks(&self) -> Vec<(&Path, &OnChangeBlock)> {
         self.blocks
             .iter()
             .filter_map(|(p, b)| {
                 if b.is_targetable() {
-                    Some((p, b))
+                    Some((p.as_path(), b))
                 } else {
                     None
                 }
@@ -156,12 +155,16 @@ impl RandomOnChangeTree {
     fn block_to_strings(block: &OnChangeBlock) -> (String, String) {
         let on_change_string = format!("LINT.OnChange({})\n", block.name_raw().unwrap_or(""));
 
-        let then_change_target: String = match block.then_change() {
-            ThenChange::FileTarget(f) => format!("{}", f.display()),
+        let then_change_target = match block.then_change() {
+            ThenChange::FileTarget(f) => format!("//{}", f.display()),
             ThenChange::BlockTarget(targets) => targets
                 .into_iter()
                 .map(|t| {
-                    let target_file = t.file.as_ref().map(|p| p.to_str().unwrap()).unwrap_or("");
+                    let target_file = t
+                        .file
+                        .as_ref()
+                        .map(|p| format!("//{}", p.to_str().unwrap()))
+                        .unwrap_or("".to_string());
                     let target_block = t.block.as_str();
                     format!("{}:{}", target_file, target_block)
                 })
@@ -259,10 +262,10 @@ impl RandomOnChangeTree {
         let n = self.rand_le(self.targetable_blocks().len());
         let (p, b) = self.targetable_blocks()[n];
         let start_line = b.start_line() as usize;
+        let p = self.root.join(p);
 
-        let mut f = std::fs::File::options().write(true).open(p).unwrap();
-
-        let s = std::fs::read_to_string(p).unwrap();
+        let mut f = std::fs::File::options().write(true).open(&p).unwrap();
+        let s = std::fs::read_to_string(&p).unwrap();
         let mut lines: Vec<&str> = s.lines().collect();
 
         let mut insert_after = None;
@@ -276,5 +279,7 @@ impl RandomOnChangeTree {
         }
 
         f.write_all(lines.join("\n").as_bytes()).unwrap();
+
+        eprintln!("Touched random block {} in file {}", b.name(), p.display());
     }
 }

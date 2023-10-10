@@ -10,8 +10,11 @@ use crate::{ThenChange, ThenChangeTarget};
 
 #[derive(Debug)]
 pub struct Parser {
+    /// Absolute path to the root directory where this parser was run.
     root_path: PathBuf,
+    /// Set of files with _relative_ paths as the key.
     files: BTreeMap<PathBuf, File>,
+    /// Total number of blocks parsed.
     num_blocks: usize,
 }
 
@@ -28,12 +31,12 @@ impl Parser {
             let block_key = (file.as_ref(), target_block.as_str());
             if !blocks.contains_key(&block_key) {
                 return Err(anyhow::anyhow!(
-                    r#"block "{}" in file "{}" has invalid OnChange target "{}:{}" (line {})"#,
+                    r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}:{}""#,
                     block.name(),
                     path.display(),
+                    block.end_line(),
                     file.display(),
                     target_block,
-                    block.end_line(),
                 ));
             }
         }
@@ -69,11 +72,11 @@ impl Parser {
                     ThenChange::FileTarget(target_path) => {
                         if !self.files.contains_key(target_path) {
                             return Err(anyhow::anyhow!(
-                                r#"block "{}" in file "{}" has invalid ThenChange target "{}" (line {})"#,
+                                r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}""#,
                                 block.name(),
                                 path.display(),
-                                target_path.display(),
                                 block.end_line(),
+                                target_path.display(),
                             ));
                         }
                     }
@@ -92,6 +95,23 @@ impl Parser {
         Ok(())
     }
 
+    fn validate_root_path<P: AsRef<Path>>(root_path: P) -> Result<()> {
+        let root_path = root_path.as_ref();
+        if !root_path.exists() {
+            Err(anyhow::anyhow!(
+                "root path {} does not exist",
+                root_path.display(),
+            ))
+        } else if !root_path.is_dir() {
+            Err(anyhow::anyhow!(
+                "root path {} is not a directory",
+                root_path.display(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Builds a parser from the given set of files, as well as any files they depend
     /// on, recursively.
     ///
@@ -103,24 +123,32 @@ impl Parser {
         let root_path = root_path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
 
+        Self::validate_root_path(&root_path)?;
+
         let mut file_stack: Vec<PathBuf> = paths
             .map(|p| {
                 let path = p.as_ref();
-                if path.exists() {
-                    path.to_owned()
-                } else {
-                    root_path.join(path)
-                }
+                path.to_owned()
             })
             .collect();
+
+        // Validate provided paths.
+        for path in &file_stack {
+            let path = root_path.join(path);
+            if !path.exists() {
+                return Err(anyhow::anyhow!(
+                    "file with path \"{}\" does not exist",
+                    path.display(),
+                ));
+            } else if !path.is_file() {
+                return Err(anyhow::anyhow!("path \"{}\" is not a file", path.display(),));
+            }
+        }
 
         let s = std::time::Instant::now();
 
         while let Some(path) = file_stack.pop() {
-            let path = path.canonicalize()?;
-            if let Some((file, files_to_parse)) =
-                File::parse(path.clone(), Some(root_path.as_path()))?
-            {
+            if let Some((file, files_to_parse)) = File::parse(path.clone(), &root_path)? {
                 files.insert(path, file);
                 for file_path in files_to_parse {
                     if !files.contains_key(&file_path) {
@@ -145,7 +173,7 @@ impl Parser {
         let s = std::time::Instant::now();
 
         let parser = Self {
-            root_path,
+            root_path: root_path.to_owned(),
             files,
             num_blocks,
         };
@@ -161,12 +189,7 @@ impl Parser {
         let root_path = path.as_ref().canonicalize()?;
         let mut files = BTreeMap::new();
 
-        if !root_path.is_dir() {
-            return Err(anyhow::anyhow!(
-                "{} is not a directory",
-                root_path.display()
-            ));
-        }
+        Self::validate_root_path(&root_path)?;
 
         let s = std::time::Instant::now();
 
@@ -176,6 +199,7 @@ impl Parser {
             .git_global(ignore)
             .git_ignore(ignore)
             .git_exclude(ignore)
+            .parents(ignore)
             .build();
         let paths: Vec<PathBuf> = dir_walker
             .filter_map(|e| {
@@ -183,7 +207,7 @@ impl Parser {
                 if !path.is_file() {
                     None
                 } else {
-                    Some(path)
+                    Some(path.strip_prefix(&root_path).unwrap().to_owned())
                 }
             })
             .collect();
@@ -196,8 +220,7 @@ impl Parser {
         let file_items: Vec<_> = paths
             .par_iter()
             .filter_map(|p| {
-                if let Some((f, _)) = File::parse(p.to_path_buf(), Some(root_path.clone())).unwrap()
-                {
+                if let Some((f, _)) = File::parse(p.to_owned(), &root_path).unwrap() {
                     Some(f)
                 } else {
                     None
@@ -221,8 +244,8 @@ impl Parser {
         );
 
         let s = std::time::Instant::now();
-        let parser = Parser {
-            root_path,
+        let parser = Self {
+            root_path: root_path.to_owned(),
             files,
             num_blocks,
         };
@@ -265,6 +288,7 @@ impl Parser {
 
 #[derive(Debug)]
 pub struct OnChangeViolation<'a> {
+    root_path: &'a Path,
     block: &'a OnChangeBlock,
     target_file: PathBuf,
     target_block: Option<&'a OnChangeBlock>,
@@ -276,18 +300,18 @@ impl<'a> ToString for OnChangeViolation<'a> {
             format!(
                 r#"block "{}" at {}:{} (due to block "{}" at {}:{})"#,
                 target_block.name(),
-                self.target_file.display(),
+                self.root_path.join(&self.target_file).display(),
                 target_block.start_line(),
                 self.block.name(),
-                self.block.file().display(),
+                self.root_path.join(&self.block.file()).display(),
                 self.block.start_line(),
             )
         } else {
             format!(
                 r#"file "{}" (due to block "{}" at {}:{})"#,
-                self.target_file.display(),
+                self.root_path.join(&self.target_file).display(),
                 self.block.name(),
-                self.block.file().display(),
+                self.root_path.join(&self.block.file()).display(),
                 self.block.start_line(),
             )
         }
@@ -329,13 +353,16 @@ impl Parser {
         let path = path.as_ref();
 
         #[cfg(feature = "git")]
-        let (staged_files, repo_path) = {
-            let repo = git2::Repository::discover(path)?;
-            repo.get_staged_files(None)?
+        let staged_files = {
+            let repo = git2::Repository::open(path)?;
+            repo.get_staged_files()?
         };
         #[cfg(not(feature = "git"))]
-        let (staged_files, repo_path) = { crate::git::cli::Cli.get_staged_files(Some(path))? };
-        Self::from_files(staged_files.iter(), repo_path)
+        let staged_files = {
+            let cli = crate::git::cli::Cli { repo_path: path };
+            cli.get_staged_files()?
+        };
+        Self::from_files(staged_files.iter(), path)
     }
 
     // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
@@ -362,6 +389,7 @@ impl Parser {
                             .get_block_in_file(on_change_file, on_change_block)
                             .expect("block should exist");
                         violations.push(OnChangeViolation {
+                            root_path: &self.root_path,
                             block,
                             target_file: on_change_file.to_owned(),
                             target_block: Some(target_block),
@@ -369,6 +397,7 @@ impl Parser {
                     }
                 } else if !files_changed.contains(on_change_file) {
                     violations.push(OnChangeViolation {
+                        root_path: &self.root_path,
                         block,
                         target_file: on_change_file.to_owned(),
                         target_block: None,
@@ -384,17 +413,14 @@ impl Parser {
         let path = self.root_path.as_path();
 
         #[cfg(feature = "git")]
-        let ((staged_files, _), staged_hunks) = {
-            // We already have a correct Git path.
+        let (staged_files, staged_hunks) = {
             let repo = git2::Repository::open(path)?;
-            (repo.get_staged_files(None)?, repo.get_staged_hunks(None)?)
+            (repo.get_staged_files()?, repo.get_staged_hunks()?)
         };
         #[cfg(not(feature = "git"))]
-        let ((staged_files, _), staged_hunks) = {
-            (
-                crate::git::cli::Cli.get_staged_files(Some(path))?,
-                crate::git::cli::Cli.get_staged_hunks(Some(path))?,
-            )
+        let (staged_files, staged_hunks) = {
+            let cli = crate::git::cli::Cli { repo_path: path };
+            (cli.get_staged_files()?, cli.get_staged_hunks()?)
         };
 
         let files_changed: HashSet<&Path> =
@@ -571,7 +597,7 @@ mod test {
         let err = res.unwrap_err().to_string();
         assert_eq!(
             err,
-            r#"OnChange target file "f3.txt" on line 6 does not exist"#
+            r#"ThenChange target file "f3.txt" at f1.txt:6 does not exist"#
         );
     }
 
@@ -595,7 +621,10 @@ mod test {
         let res = Parser::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
-        assert!(err.contains("has invalid OnChange target"));
+        assert_eq!(
+            err,
+            r#"block "default" at "f1.txt:6" has non-existent ThenChange target "f2.txt:invalid""#,
+        );
     }
 
     #[test]
@@ -617,7 +646,10 @@ mod test {
         let res = Parser::from_files(file_names, d.path());
         assert!(res.is_err());
         let err = res.unwrap_err().to_string();
-        assert!(err.contains(r#"duplicate block name "default" found on lines 1 and 7"#));
+        assert_eq!(
+            err,
+            r#"duplicate block name "default" found on f1.txt:1 and f1.txt:7"#,
+        );
     }
 
     #[test]
@@ -708,7 +740,7 @@ mod test {
                         def __init__(self):
                             # LINT.OnChange(python)
                             self.v = 10
-                            # LINT.ThenChange(f1.html)
+                            # LINT.ThenChange(../f1.html)
 
                     if __name__ == "__main__":
                         print(A())

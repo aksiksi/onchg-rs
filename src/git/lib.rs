@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use git2::{Delta, DiffHunk, DiffLine, Repository, StatusOptions};
@@ -28,12 +28,7 @@ impl From<DiffLine<'_>> for Line {
 }
 
 impl Repo for Repository {
-    fn get_staged_files(&self, repo_path: Option<&Path>) -> Result<(Vec<PathBuf>, PathBuf)> {
-        let repo_path = match repo_path {
-            Some(p) => p,
-            None => self.path().parent().unwrap(),
-        };
-
+    fn get_staged_files(&self) -> Result<Vec<PathBuf>> {
         let mut opts = StatusOptions::new();
         let mut paths = Vec::new();
         for entry in self
@@ -49,20 +44,14 @@ impl Repo for Repository {
                 Some(p) => p,
                 None => continue,
             };
-            paths.push(repo_path.join(Path::new(file_path)));
+            paths.push(PathBuf::from(file_path));
         }
-
-        Ok((paths, repo_path.to_owned()))
+        Ok(paths)
     }
 
     // NOTE(aksiksi): We can probably filter out irrelevant hunks here if we look at
     // the blocks in the FileSet.
-    fn get_staged_hunks(&self, repo_path: Option<&Path>) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
-        let repo_path = match repo_path {
-            Some(p) => p,
-            None => self.path().parent().unwrap(),
-        };
-
+    fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
         let mut hunk_map: BTreeMap<PathBuf, HashMap<(u32, u32), Hunk>> = BTreeMap::new();
         let tree = self.head()?.peel_to_tree()?;
         let diff = self.diff_tree_to_index(Some(&tree), None, None)?;
@@ -93,7 +82,6 @@ impl Repo for Repository {
                     .path()
                     .expect("no new file provided")
                     .to_owned();
-                let file_path = repo_path.join(file_path);
 
                 let this_hunk = Hunk::from(raw_hunk);
                 let (start_line, end_line) = (this_hunk.start_line, this_hunk.end_line);

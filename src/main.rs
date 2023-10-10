@@ -4,7 +4,8 @@ use clap::Parser as CliParser;
 
 use onchg::Parser;
 
-const DEFAULT_MAX_FILES_TO_DISPLAY: usize = 50;
+const DEFAULT_MAX_FILES_TO_DISPLAY: usize = 15;
+const DEFAULT_MAX_VIOLATIONS_TO_DISPLAY: usize = 10;
 
 fn default_path() -> PathBuf {
     PathBuf::from(".")
@@ -82,7 +83,7 @@ fn main() {
                 parser.num_blocks(),
             );
             for f in files.iter().take(DEFAULT_MAX_FILES_TO_DISPLAY) {
-                println!("  * {}", f.display());
+                println!("  * {}", parser.root_path().join(f).display());
             }
             if files.len() > DEFAULT_MAX_FILES_TO_DISPLAY {
                 println!(
@@ -108,8 +109,14 @@ fn main() {
             let violations = violations.unwrap();
             if violations.len() != 0 {
                 eprintln!("Violations:");
-                for v in violations {
+                for v in violations.iter().take(DEFAULT_MAX_VIOLATIONS_TO_DISPLAY) {
                     eprintln!("  * {}", v.to_string());
+                }
+                if violations.len() > DEFAULT_MAX_FILES_TO_DISPLAY {
+                    println!(
+                        "  ... {} violations omitted",
+                        violations.len() - DEFAULT_MAX_VIOLATIONS_TO_DISPLAY,
+                    );
                 }
                 std::process::exit(1);
             }

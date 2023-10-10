@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 
@@ -8,8 +8,8 @@ pub mod cli;
 mod lib;
 
 pub trait Repo {
-    fn get_staged_files(&self, repo_path: Option<&Path>) -> Result<(Vec<PathBuf>, PathBuf)>;
-    fn get_staged_hunks(&self, repo_path: Option<&Path>) -> Result<BTreeMap<PathBuf, Vec<Hunk>>>;
+    fn get_staged_files(&self) -> Result<Vec<PathBuf>>;
+    fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>>;
 }
 
 #[derive(Debug)]

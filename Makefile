@@ -10,8 +10,8 @@ build: check
 	cargo build
 
 test: check
-	cargo test -- --nocapture
-	cargo test --features git -- --nocapture
+	cargo test -- --nocapture --test-threads 1
+	cargo test --features git -- --nocapture --test-threads 1
 
 ci:
 	cargo test --verbose -- --nocapture
