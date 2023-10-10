@@ -47,9 +47,10 @@ cat >header.h <<EOL
 
 // LINT.OnChange(supported-services)
 typedef enum {
-    INVALID = 0;
-    MAIN = 1;
-    PRIMARY = 2;
+    INVALID = 0,
+    MAIN = 1,
+    PRIMARY = 2,
+    OTHER = 3,
 } supported_services_t;
 // LINT.ThenChange(docs.md:supported-services)
 
