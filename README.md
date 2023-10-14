@@ -9,25 +9,29 @@ A tool that allows you to keep blocks in sync across different files in your cod
 
 ## Install
 
-```
-cargo install onchg
-```
-
 ### [pre-commit](https://pre-commit.com/) hook
 
 ```yaml
 - repo: https://github.com/aksiksi/onchg-rs
   rev: v0.1.5
   hooks:
-    - onchg
+    - id: onchg
 ```
 
-## Tutorial
+### CLI
+
+```
+cargo install onchg
+```
+
+## Tutorials
+
+### Setup
 
 Create an empty directory:
 
 ```
-mkdir -p ~/onchg/quickstart && cd ~/onchg/quickstart
+mkdir -p /tmp/onchg/quickstart && cd /tmp/onchg/quickstart
 ```
 
 Create two files - `docs.md` and `header.h`:
@@ -66,6 +70,62 @@ typedef enum {
 EOL
 ```
 
+Create a Git repo and commit both files:
+
+```
+git init . && git add . && git commit -m "first commit"
+```
+
+### pre-commit
+
+Create the `pre-commit` config and install the hook:
+
+```
+cat >.pre-commit-config.yaml <<EOL
+repos:
+  - repo: https://github.com/aksiksi/onchg-rs
+    rev: v0.1.5
+    hooks:
+      - id: onchg
+EOL
+
+pre-commit install
+```
+
+Change `header.h`:
+
+```diff
+--- a/header.h
++++ b/header.h
+@@ -5,6 +5,7 @@ typedef enum {
+     MAIN = 1,
+     PRIMARY = 2,
+     OTHER = 3,
++    NEW = 4,
+ } supported_services_t;
+ // LINT.ThenChange(docs.md:supported-services)
+```
+
+Stage and commit:
+
+```
+$ git add . && git commit -m "my commit"
+onchg....................................................................Failed
+- hook id: onchg
+- exit code: 1
+
+Root path: /home/aksiksi/onchg/quickstart
+
+Parsed 2 files (2 blocks total):
+  * /home/aksiksi/onchg/quickstart/docs.md
+  * /home/aksiksi/onchg/quickstart/header.h
+
+Violations:
+  * block "supported-services" at /home/aksiksi/onchg/quickstart/docs.md:5 (due to block "supported-services" at /home/aksiksi/onchg/quickstart/header.h:2)
+```
+
+### CLI
+
 Run `onchg` on the directory:
 
 ```
@@ -77,12 +137,6 @@ Parsed 2 files (2 blocks total):
   * /home/aksiksi/onchg/quickstart/header.h
 
 OK.
-```
-
-Create a Git repo and commit both files:
-
-```
-git init . && git add . && git commit -m 'first message'
 ```
 
 Make a change to the enum in `header.h`:
