@@ -13,6 +13,15 @@ A tool that allows you to keep blocks in sync across different files in your cod
 cargo install onchg
 ```
 
+### [pre-commit](https://pre-commit.com/) hook
+
+```yaml
+- repo: https://github.com/aksiksi/onchg-rs
+  rev: v0.1.5
+  hooks:
+    - onchg
+```
+
 ## Tutorial
 
 Create an empty directory:

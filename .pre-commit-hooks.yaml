@@ -1,0 +1,7 @@
+- id: onchg
+  name: onchg
+  description: Keep blocks in sync across different files in your repo.
+  entry: onchg repo
+  pass_filenames: false
+  language: rust
+  types: [text]
