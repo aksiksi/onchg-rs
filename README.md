@@ -70,17 +70,30 @@ Parsed 2 files (2 blocks total):
 OK.
 ```
 
-Create a Git repo and stage `docs.md`:
+Create a Git repo and commit both files:
 
 ```
-git init .
-git add docs.md
+git init . && git add . && git commit -m 'first message'
 ```
 
-Run `onchg` in repo mode:
+Make a change to the enum in `header.h`:
+
+```diff
+--- a/header.h
++++ b/header.h
+@@ -5,6 +5,7 @@ typedef enum {
+     MAIN = 1,
+     PRIMARY = 2,
+     OTHER = 3,
++    NEW = 4,
+ } supported_services_t;
+ // LINT.ThenChange(docs.md:supported-services)
+```
+
+Stage the change & run `onchg` in repo mode:
 
 ```
-$ onchg repo
+$ git add header.h && onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
 Parsed 2 files (2 blocks total):
@@ -88,13 +101,26 @@ Parsed 2 files (2 blocks total):
   * /home/aksiksi/onchg/quickstart/header.h
 
 Violations:
-  * block "supported-services" in staged file at "/home/aksiksi/onchg/quickstart/docs.md:5" has changed, but its OnChange target block "supported-services" at "/home/aksiksi/onchg/quickstart/header.h:2" has not
+  * block "supported-services" at /home/aksiksi/onchg/quickstart/docs.md:5 (due to block "supported-services" at /home/aksiksi/onchg/quickstart/header.h:2)
 ```
 
-Stage `header.h` and re-run:
+Change `docs.md`:
+
+```diff
+--- a/docs.md
++++ b/docs.md
+@@ -6,5 +6,6 @@
+ * Main
+ * Primary
+ * Other
++* New
+ <!-- LINT.ThenChange(header.h:supported-services) -->
+```
+
+Stage the change & re-run `onchg`:
 
 ```
-$ onchg repo
+$ git add docs.md && onchg repo
 Root path: /home/aksiksi/onchg/quickstart
 
 Parsed 2 files (2 blocks total):
@@ -128,14 +154,13 @@ When compared to `grep`, in addition to finding matches in all files, `onchg` ne
 ~2x slower than `grep`:
 
 ```
+directory-sparse/150    time:   [2.5643 ms 2.5974 ms 2.6338 ms]
+grep-sparse/150         time:   [1.6161 ms 1.6241 ms 1.6328 ms]
+ripgrep-sparse/150      time:   [4.9077 ms 4.9354 ms 4.9640 ms]
 
-directory-sparse/150    time:   [2.8788 ms 2.9122 ms 2.9564 ms]
-grep-sparse/150         time:   [1.6747 ms 1.6905 ms 1.7096 ms]
-ripgrep-sparse/150      time:   [5.1610 ms 5.1990 ms 5.2374 ms]
-
-directory-sparse/1000   time:   [17.001 ms 17.183 ms 17.383 ms]
-grep-sparse/1000        time:   [6.7350 ms 6.8130 ms 6.8944 ms]
-ripgrep-sparse/1000     time:   [7.9359 ms 8.0190 ms 8.1125 ms]
+directory-sparse/1000   time:   [15.186 ms 15.271 ms 15.359 ms]
+grep-sparse/1000        time:   [6.4750 ms 6.5380 ms 6.6048 ms]
+ripgrep-sparse/1000     time:   [7.6132 ms 7.6550 ms 7.6980 ms]
 ```
 
 ### Dense
@@ -145,14 +170,14 @@ ripgrep-sparse/1000     time:   [7.9359 ms 8.0190 ms 8.1125 ms]
 
 50-100 blocks per file. Same line count and line length settings as sparse bench.
 
-5-10x slower than `grep`:
+5-6x slower than `grep`:
 
 ```
-directory-dense/150     time:   [14.406 ms 14.556 ms 14.725 ms]
-grep-dense/150          time:   [3.4290 ms 3.4814 ms 3.5367 ms]
-ripgrep-dense/150       time:   [7.3262 ms 7.3873 ms 7.4505 ms]
+directory-dense/150     time:   [11.388 ms 11.469 ms 11.554 ms]
+grep-dense/150          time:   [3.1692 ms 3.1907 ms 3.2138 ms]
+ripgrep-dense/150       time:   [6.7027 ms 6.7731 ms 6.8621 ms]
 
-directory-dense/1000    time:   [108.37 ms 109.40 ms 110.57 ms]
-grep-dense/1000         time:   [17.434 ms 17.549 ms 17.666 ms]
-ripgrep-dense/1000      time:   [18.363 ms 18.517 ms 18.670 ms]
+directory-dense/1000    time:   [83.987 ms 84.581 ms 85.224 ms]
+grep-dense/1000         time:   [15.269 ms 15.349 ms 15.430 ms]
+ripgrep-dense/1000      time:   [15.800 ms 15.901 ms 16.004 ms]
 ```
