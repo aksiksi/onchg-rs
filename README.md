@@ -38,24 +38,24 @@ Create two files - `docs.md` and `header.h`:
 
 **`docs.md`**:
 
-```
+```markdown
 cat >docs.md <<EOL
 # Docs
 
 ## Supported Services
 
-<!-- LINT.OnChange(supported-services) -->
+<!--- LINT.OnChange(supported-services) --->
 * Main
 * Primary
 * Other
-<!-- LINT.ThenChange(header.h:supported-services) -->
+<!--- LINT.ThenChange(header.h:supported-services) --->
 
 EOL
 ```
 
 **`header.h`**:
 
-```
+```c
 cat >header.h <<EOL
 
 // LINT.OnChange(supported-services)
@@ -70,7 +70,7 @@ typedef enum {
 EOL
 ```
 
-Create a Git repo and commit both files:
+Initialize a Git repo and commit both files:
 
 ```
 git init . && git add . && git commit -m "first commit"
@@ -78,7 +78,7 @@ git init . && git add . && git commit -m "first commit"
 
 ### pre-commit
 
-Create the `pre-commit` config and install the hook:
+Create a `pre-commit` config and install the hook:
 
 ```
 cat >.pre-commit-config.yaml <<EOL
