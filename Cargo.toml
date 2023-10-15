@@ -47,5 +47,9 @@ indoc = "2.0.4"
 predicates = "3.0.4"
 
 [[bench]]
-name = "onchg"
+name = "directory"
+harness = false
+
+[[bench]]
+name = "repo"
 harness = false

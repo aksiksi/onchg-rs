@@ -280,7 +280,5 @@ impl RandomOnChangeTree {
         }
 
         f.write_all(lines.join("\n").as_bytes()).unwrap();
-
-        eprintln!("Touched random block {} in file {}", b.name(), p.display());
     }
 }

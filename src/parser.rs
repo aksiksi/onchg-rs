@@ -417,6 +417,8 @@ impl Parser {
     pub fn validate_git_repo(&self) -> Result<Vec<OnChangeViolation<'_>>> {
         let path = self.root_path.as_path();
 
+        let s = std::time::Instant::now();
+
         #[cfg(feature = "git")]
         let (staged_files, staged_hunks) = {
             let repo = git2::Repository::open(path)?;
@@ -427,6 +429,10 @@ impl Parser {
             let cli = crate::git::cli::Cli { repo_path: path };
             (cli.get_staged_files()?, cli.get_staged_hunks()?)
         };
+
+        log::info!("Got staged files and hunks in {:?}", s.elapsed());
+
+        let s = std::time::Instant::now();
 
         let files_changed: HashSet<&Path> =
             HashSet::from_iter(staged_files.iter().map(|p| p.as_path()));
@@ -449,11 +455,17 @@ impl Parser {
             }
         }
 
+        log::info!("Found changed blocks in {:?}", s.elapsed());
+
+        let s = std::time::Instant::now();
+
         let violations = self.validate_changed_files_and_blocks(
             files_changed,
             blocks_changed,
             targetable_blocks_changed,
         );
+
+        log::info!("Validated changed files and blocks in {:?}", s.elapsed());
 
         Ok(violations)
     }

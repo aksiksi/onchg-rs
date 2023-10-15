@@ -153,5 +153,6 @@ pub fn directory_dense(c: &mut Criterion) {
     });
 }
 
+
 criterion_group!(benches, directory_sparse, directory_dense);
 criterion_main!(benches);

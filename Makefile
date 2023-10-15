@@ -6,6 +6,9 @@ check:
 bench:
 	cargo bench
 
+bench-git:
+	cargo bench --features git
+
 build: check
 	cargo build
 
@@ -27,4 +30,4 @@ coverage:
 fmt:
 	cargo fmt
 
-.PHONY: all benches build check ci coverage fmt test
+.PHONY: all bench bench-git build check ci coverage fmt test

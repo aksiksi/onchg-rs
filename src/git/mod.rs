@@ -9,6 +9,7 @@ mod lib;
 
 pub trait Repo {
     fn get_staged_files(&self) -> Result<Vec<PathBuf>>;
+    // NOTE: We could optimize by having it accept a list of files to check.
     fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>>;
 }
 

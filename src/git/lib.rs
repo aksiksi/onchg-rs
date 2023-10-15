@@ -49,8 +49,7 @@ impl Repo for Repository {
         Ok(paths)
     }
 
-    // NOTE(aksiksi): We can probably filter out irrelevant hunks here if we look at
-    // the blocks in the FileSet.
+    // NOTE: This is slower than CLI-based diff. See benchmark.
     fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
         let mut hunk_map: BTreeMap<PathBuf, HashMap<(u32, u32), Hunk>> = BTreeMap::new();
         let tree = self.head()?.peel_to_tree()?;
