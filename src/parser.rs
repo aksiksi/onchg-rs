@@ -26,18 +26,34 @@ impl Parser {
         target: &ThenChangeTarget,
         blocks: &HashMap<(&Path, &str), &OnChangeBlock>,
     ) -> Result<()> {
-        let (target_block, target_file) = (&target.block, target.file.as_ref());
-        if let Some(file) = target_file {
-            let block_key = (file.as_ref(), target_block.as_str());
-            if !blocks.contains_key(&block_key) {
-                return Err(anyhow::anyhow!(
-                    r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}:{}""#,
-                    block.name(),
-                    path.display(),
-                    block.end_line(),
-                    file.display(),
-                    target_block,
-                ));
+        match target {
+            ThenChangeTarget::File(file) => {
+                if !self.files.contains_key(file) {
+                    return Err(anyhow::anyhow!(
+                        r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}""#,
+                        block.name(),
+                        path.display(),
+                        block.end_line(),
+                        file.display(),
+                    ));
+                }
+            }
+            ThenChangeTarget::Block {
+                block: target_block,
+                file,
+            } => {
+                let file = file.as_deref().unwrap_or(path);
+                let block_key = (file, target_block.as_str());
+                if !blocks.contains_key(&block_key) {
+                    return Err(anyhow::anyhow!(
+                        r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}:{}""#,
+                        block.name(),
+                        path.display(),
+                        block.end_line(),
+                        file.display(),
+                        target_block,
+                    ));
+                }
             }
         }
         Ok(())
@@ -64,20 +80,9 @@ impl Parser {
             for block in &file.blocks {
                 match block.then_change() {
                     ThenChange::NoTarget => {}
-                    ThenChange::BlockTarget(target_blocks) => {
-                        for target in target_blocks {
-                            Self::validate_block_target(&self, path, block, target, &blocks)?;
-                        }
-                    }
-                    ThenChange::FileTarget(target_path) => {
-                        if !self.files.contains_key(target_path) {
-                            return Err(anyhow::anyhow!(
-                                r#"block "{}" at "{}:{}" has non-existent ThenChange target "{}""#,
-                                block.name(),
-                                path.display(),
-                                block.end_line(),
-                                target_path.display(),
-                            ));
+                    ThenChange::Targets(targets) => {
+                        for t in targets {
+                            Self::validate_block_target(&self, path, block, t, &blocks)?;
                         }
                     }
                     ThenChange::Unset => {

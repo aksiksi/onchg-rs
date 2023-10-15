@@ -18,19 +18,48 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Clone, Debug)]
-pub struct ThenChangeTarget {
-    pub block: String,
-    pub file: Option<PathBuf>,
+pub enum ThenChangeTarget {
+    File(PathBuf),
+    Block {
+        block: String,
+        file: Option<PathBuf>,
+    },
+}
+
+impl ThenChangeTarget {
+    pub fn file(&self) -> Option<&Path> {
+        match self {
+            ThenChangeTarget::File(file) => Some(file.as_path()),
+            ThenChangeTarget::Block { file, .. } => file.as_deref(),
+        }
+    }
+
+    pub fn block(&self) -> Option<&str> {
+        match self {
+            ThenChangeTarget::File(_) => None,
+            ThenChangeTarget::Block { block, .. } => Some(&block),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum ThenChange {
     Unset,
     NoTarget,
-    /// Entire file.
-    FileTarget(PathBuf),
-    /// One or more blocks.
-    BlockTarget(Vec<ThenChangeTarget>),
+    /// One or more files and/or blocks.
+    Targets(Vec<ThenChangeTarget>),
+}
+
+impl From<ThenChangeTarget> for ThenChange {
+    fn from(t: ThenChangeTarget) -> Self {
+        Self::Targets(vec![t])
+    }
+}
+
+impl From<Vec<ThenChangeTarget>> for ThenChange {
+    fn from(v: Vec<ThenChangeTarget>) -> Self {
+        Self::Targets(v)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -147,19 +176,17 @@ impl OnChangeBlock {
     }
 
     /// Returns an iterator over ThenChangeTarget(s) as tuples of (file_path, block_name).
-    /// If a target has no path set, it will be replaced with the provided file path.
+    /// If a target has no path set, it will be replaced with this block's file path.
     pub fn get_then_change_targets_as_keys<'a>(
         &'a self,
     ) -> Box<dyn Iterator<Item = (&Path, Option<&str>)> + 'a> {
         match &self.then_change {
             ThenChange::NoTarget | ThenChange::Unset => Box::new(std::iter::empty()),
-            ThenChange::FileTarget(path) => Box::new(std::iter::once((path.as_path(), None))),
-            ThenChange::BlockTarget(targets) => {
-                Box::new(targets.iter().map(move |t| match &t.file {
-                    Some(path) => (path.as_path(), Some(t.block.as_str())),
-                    None => (self.file.as_path(), Some(t.block.as_str())),
-                }))
-            }
+            ThenChange::Targets(targets) => Box::new(
+                targets
+                    .iter()
+                    .map(move |t| (t.file().unwrap_or_else(|| self.file()), t.block())),
+            ),
         }
     }
 }
@@ -280,6 +307,13 @@ impl File {
         then_change_target: &str,
         line_num: usize,
     ) -> Result<ThenChangeTarget> {
+        if !then_change_target.contains(":") {
+            // Try to parse as just a file target.
+            let file_path =
+                Self::parse_then_target_file_path(path, root_path, then_change_target, line_num)?;
+            return Ok(ThenChangeTarget::File(file_path).into());
+        }
+
         let split_target: Vec<&str> = then_change_target.split(":").collect();
         if split_target.len() < 2 {
             return Err(anyhow::anyhow!(
@@ -291,7 +325,7 @@ impl File {
         let block_name = split_target[1];
         if split_target[0] == "" {
             // Block target in same file.
-            return Ok(ThenChangeTarget {
+            return Ok(ThenChangeTarget::Block {
                 block: block_name.to_string(),
                 file: None,
             });
@@ -301,7 +335,7 @@ impl File {
         let file_path =
             Self::parse_then_target_file_path(path, root_path, split_target[0], line_num)?;
 
-        Ok(ThenChangeTarget {
+        Ok(ThenChangeTarget::Block {
             block: block_name.to_string(),
             file: Some(file_path),
         })
@@ -318,16 +352,8 @@ impl File {
         if then_change_target.is_empty() {
             return Ok(ThenChange::NoTarget);
         }
-        if !then_change_target.contains(":") {
-            // Try to parse as just a file target.
-            let file_path =
-                Self::parse_then_target_file_path(path, root_path, then_change_target, line_num)?;
-            files_to_parse.insert(file_path.clone());
-            return Ok(ThenChange::FileTarget(file_path));
-        }
 
         // Split on comma to build a list of targets.
-        let mut then_change_targets = Vec::new();
         let split_by_comma: Vec<&str> = then_change_target.split(",").collect();
         let split_by_comma = if split_by_comma.len() == 0 {
             // Single target.
@@ -336,16 +362,17 @@ impl File {
             split_by_comma
         };
 
+        let mut then_change_targets = Vec::new();
         for target in split_by_comma {
             let target = target.trim();
             let t = Self::parse_single_then_change_target(path, root_path, target, line_num)?;
-            if let Some(f) = &t.file {
-                files_to_parse.insert(f.clone());
+            if let Some(f) = t.file() {
+                files_to_parse.insert(f.to_owned());
             }
             then_change_targets.push(t);
         }
 
-        Ok(ThenChange::BlockTarget(then_change_targets))
+        Ok(then_change_targets.into())
     }
 
     fn handle_on_change(

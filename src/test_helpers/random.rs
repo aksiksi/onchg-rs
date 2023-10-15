@@ -156,17 +156,20 @@ impl RandomOnChangeTree {
         let on_change_string = format!("LINT.OnChange({})\n", block.name_raw().unwrap_or(""));
 
         let then_change_target = match block.then_change() {
-            ThenChange::FileTarget(f) => format!("//{}", f.display()),
-            ThenChange::BlockTarget(targets) => targets
+            ThenChange::Targets(targets) => targets
                 .into_iter()
                 .map(|t| {
                     let target_file = t
-                        .file
+                        .file()
                         .as_ref()
                         .map(|p| format!("//{}", p.to_str().unwrap()))
                         .unwrap_or("".to_string());
-                    let target_block = t.block.as_str();
-                    format!("{}:{}", target_file, target_block)
+                    let target_block = t.block();
+                    if let Some(target_block) = target_block {
+                        format!("{}:{}", target_file, target_block)
+                    } else {
+                        format!("{}", target_file)
+                    }
                 })
                 .collect::<Vec<String>>()
                 .join(","),
@@ -223,15 +226,13 @@ impl RandomOnChangeTree {
 
             let start_line = line_num as u32;
             let end_line = (line_num + num_lines) as u32;
-            let block_target = match (then_change_file, then_change_block) {
-                (then_change_file, Some(then_change_block)) => {
-                    let v = vec![ThenChangeTarget {
-                        file: then_change_file,
-                        block: then_change_block,
-                    }];
-                    ThenChange::BlockTarget(v)
+            let block_target: ThenChange = match (then_change_file, then_change_block) {
+                (then_change_file, Some(then_change_block)) => ThenChangeTarget::Block {
+                    block: then_change_block,
+                    file: then_change_file,
                 }
-                (Some(then_change_file), None) => ThenChange::FileTarget(then_change_file),
+                .into(),
+                (Some(then_change_file), None) => ThenChangeTarget::File(then_change_file).into(),
                 (None, None) => ThenChange::NoTarget,
             };
             let block =
