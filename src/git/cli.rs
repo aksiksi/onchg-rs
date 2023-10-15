@@ -82,6 +82,10 @@ impl<'a> Repo for Cli<'a> {
         }
         let mut hunk_map: BTreeMap<PathBuf, Vec<Hunk>> = BTreeMap::new();
 
+        if stdout.trim().is_empty() {
+            return Ok(hunk_map);
+        }
+
         // TODO(aksiksi): Handle deleted files, binary files, etc.
         let patch = Patch::from_multiple(stdout).map_err(|e| anyhow::anyhow!("{}", e))?;
         for diff_file in patch {

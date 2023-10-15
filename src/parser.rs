@@ -1090,4 +1090,10 @@ mod test {
         )]);
         parse_and_validate(d.path(), 0);
     }
+
+    #[test]
+    fn test_validate_empty_git_repo() {
+        let d = GitRepo::new();
+        parse_and_validate(d.path(), 0);
+    }
 }
