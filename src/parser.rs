@@ -417,6 +417,10 @@ impl Parser {
     pub fn validate_git_repo(&self) -> Result<Vec<OnChangeViolation<'_>>> {
         let path = self.root_path.as_path();
 
+        if self.files.len() == 0 {
+            return Ok(Vec::new());
+        }
+
         let s = std::time::Instant::now();
 
         #[cfg(feature = "git")]
