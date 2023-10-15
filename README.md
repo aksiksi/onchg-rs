@@ -24,7 +24,7 @@ A tool that allows you to keep blocks in sync across different files in your cod
 cargo install onchg
 ```
 
-## Tutorials
+## Quickstart
 
 ### Setup
 
@@ -192,6 +192,137 @@ Parsed 2 files (2 blocks total):
 
 OK.
 ```
+
+## Documentation
+
+### Examples
+
+#### Two-way Dependency
+
+`alpha.txt`:
+
+```
+OnChange(my-block)
+
+ThenChange(beta.txt:their-block)
+```
+
+`beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange(alpha.txt:my-block)
+```
+
+#### Relative Paths
+
+`alpha.txt`:
+
+```
+OnChange(my-block)
+
+ThenChange(subdir/beta.txt:their-block)
+```
+
+`subdir/beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange(../alpha.txt:my-block)
+```
+
+#### Root Paths
+
+`alpha.txt`:
+
+```
+OnChange(my-block)
+
+ThenChange(subdir/beta.txt:their-block)
+```
+
+`subdir/beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange(//alpha.txt:my-block)
+```
+
+#### One-way OnChange and ThenChange
+
+`alpha.txt`:
+
+```
+OnChange()
+
+ThenChange(beta.txt:their-block)
+```
+
+`beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange()
+```
+
+#### Multiple Dependencies
+
+`alpha.txt`:
+
+```
+OnChange(my-block)
+
+ThenChange(beta.txt:their-block, gamma.txt:another)
+```
+
+`beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange()
+```
+
+`gamma.txt`:
+
+```
+OnChange(another)
+
+ThenChange(alpha.txt:my-block, beta.txt:their-block)
+```
+
+### Details
+
+`onchg` uses **blocks** to capture depdendencies between sections of code (or more generally text) across different files.
+
+A block looks like this:
+
+```
+OnChange( [name] )
+
+ThenChange( [<target>[, ...]] )
+```
+
+The `OnChange` and `ThenChange` sections can exist anywhere on a line. This allows you to place the sections inside any type of code comment.
+
+`OnChange` accepts an optional `name`. If a block does not specify a name, it cannot be used as a target by other blocks. This is useful in cases where you want one-way dependencies - i.e., if this block changes, other blocks should change, but not vice-versa.
+
+`ThenChange` accepts zero or more `target`s. A block target has the following syntax:
+
+```
+[file][:[block]]
+```
+
+Just like `OnChange`, `ThenChange` allows for one-way dependencies if the target list is empty.
+
+If a target is specified, it can either be a file or a block in a file. The block is just the block name. The file path must be one of the following:
+
+1. Relative: The path is relative to the current file's path (e.g., `abc/hello.txt`).
+2. Relative to the root: The path starts with `//` to indicate that the path is relative to the root directory. This is the path you specify when running `onchg`. Typically, the root would be the Git repo root.
 
 ## Benchmarks
 
