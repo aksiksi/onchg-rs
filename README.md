@@ -295,6 +295,20 @@ OnChange(another)
 ThenChange(alpha.txt:my-block, beta.txt:their-block)
 ```
 
+#### Nested Blocks
+
+`alpha.txt`:
+
+```
+OnChange(my-block)
+
+OnChange(inner-block)
+
+ThenChange(beta.txt:their-block)
+
+ThenChange()
+```
+
 ### Details
 
 `onchg` uses **blocks** to capture depdendencies between sections of code (or more generally text) across different files.
