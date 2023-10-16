@@ -117,6 +117,19 @@ impl OnChangeBlock {
         &self.then_change
     }
 
+    /// Fast check to see if a hunk overlaps with this block.
+    pub fn is_hunk_overlap(&self, hunk: &Hunk) -> bool {
+        // Block contains hunk.
+        hunk.start_line >= self.start_line && hunk.end_line <= self.end_line ||
+        // Hunk contains block.
+        self.start_line >= hunk.start_line && self.end_line <= hunk.end_line ||
+        // Hunk starts before block and ends within it.
+        self.start_line >= hunk.start_line && hunk.end_line <= self.end_line ||
+        // Hunk starts after block and ends after it.
+        hunk.start_line >= self.start_line && hunk.end_line >= self.end_line
+    }
+
+    /// Returns true if this block has been changed by the given hunk.
     pub fn is_changed_by_hunk(&self, hunk: &Hunk) -> bool {
         let mut old_start_line = None;
         let mut old_end_line = None;
@@ -543,13 +556,58 @@ impl File {
         Ok(blocks)
     }
 
+    fn filter_unchanged_blocks(blocks: Vec<OnChangeBlock>, hunks: &[Hunk]) -> Vec<OnChangeBlock> {
+        let mut changed_blocks = HashSet::new();
+
+        // Fast-path to eliminate clearly untouched blocks.
+        let mut maybe_changed = Vec::new();
+        for hunk in hunks {
+            for (i, block) in blocks.iter().enumerate() {
+                if block.is_hunk_overlap(hunk) {
+                    maybe_changed.push((hunk, i));
+                }
+            }
+        }
+
+        // Actual change logic occurs here.
+        for (hunk, block_idx) in maybe_changed {
+            if changed_blocks.contains(&block_idx) {
+                continue;
+            }
+            let block = &blocks[block_idx];
+            if block.is_changed_by_hunk(hunk) {
+                changed_blocks.insert(block_idx);
+            }
+        }
+
+        blocks
+            .into_iter()
+            .enumerate()
+            .filter(|(idx, _)| changed_blocks.contains(idx))
+            .map(|(_, block)| block)
+            .collect()
+    }
+
     pub fn parse<P: AsRef<Path>>(
         path: PathBuf,
         root_path: P,
+        hunks: Option<&[Hunk]>,
     ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
         let root_path = root_path.as_ref();
 
-        let blocks = Self::parse_internal(Arc::new(path.clone()), root_path.as_ref())?;
+        // If there are no staged hunks for this file, we actually don't need to parse it at all :)
+        if let Some(hunks) = hunks {
+            if hunks.len() == 0 {
+                return Ok(None);
+            }
+        }
+
+        let mut blocks = Self::parse_internal(Arc::new(path.clone()), root_path.as_ref())?;
+
+        // If a set of hunks was provided, filter out blocks that have not been changed by a hunk.
+        if let Some(hunks) = hunks {
+            blocks = Self::filter_unchanged_blocks(blocks, hunks);
+        }
 
         let mut files_to_parse = HashSet::new();
 

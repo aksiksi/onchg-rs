@@ -32,16 +32,3 @@ pub enum Line {
     /// Context line number (old, new).
     Context(u32, u32),
 }
-
-impl Hunk {
-    pub fn is_block_overlap(&self, start: u32, end: u32) -> bool {
-        // Block contains hunk.
-        self.start_line >= start && self.end_line <= end ||
-        // Hunk contains block.
-        start >= self.start_line && end <= self.end_line ||
-        // Hunk starts before block and ends within it.
-        start >= self.start_line && self.end_line <= end ||
-        // Hunk starts after block and ends after it.
-        self.start_line >= start && self.end_line >= end
-    }
-}

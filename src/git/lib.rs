@@ -61,6 +61,12 @@ impl Repo for Repository {
     // But is there even another way to get hunk content? Based on the API, using the line_cb is
     // the only way to see diff content.
     fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
+        // Sanity check, but also kind of required because the methods below
+        // fail on an empty repo.
+        if self.get_staged_files()?.len() == 0 {
+            return Ok(BTreeMap::new());
+        }
+
         let mut hunk_map: BTreeMap<PathBuf, HashMap<(u32, u32), Hunk>> = BTreeMap::new();
 
         let s = std::time::Instant::now();

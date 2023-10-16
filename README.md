@@ -309,6 +309,14 @@ ThenChange(beta.txt:their-block)
 ThenChange()
 ```
 
+`beta.txt`:
+
+```
+OnChange(their-block)
+
+ThenChange()
+```
+
 ### Details
 
 `onchg` uses **blocks** to capture depdendencies between sections of code (or more generally text) across different files.
@@ -407,18 +415,15 @@ connectivity is quite high as noted above. Note that the bench generates a total
 across 1000 files.
 
 ```
-git-repo/200            time:   [862.56 ms 866.89 ms 871.40 ms]
+git-repo/200            time:   [339.91 ms 340.70 ms 341.53 ms]
 ```
 
 #### Why so much slower??
 
-Three reasons:
+Two reasons:
 
 1. The file walk is **single-threaded**.
-2. Parsing takes a longer time than above (~5x longer!) due to the randomized nature of the walk.
-Each block refers to random blocks in typically distant files, which leads to an essentially **random-access**
-pattern of traversal. In contrast, the directory benches above traverse the directory in more ordered fashion.
-3. It takes a whopping 250ms just to render the staged diff to stdout!
+2. It takes a whopping 250ms just to render the staged diff to stdout!
 
 One interesting finding: when using `libgit2` via the `git` feature, the bench takes ~250ms longer. After
 digging into it a bit, it seems that the source of the delay is the diff line iterator in `libgit2`. Somehow,
