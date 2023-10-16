@@ -345,7 +345,6 @@ impl File {
         path: &Path,
         root_path: &Path,
         then_change_target: &str,
-        files_to_parse: &mut HashSet<PathBuf>,
         line_num: usize,
     ) -> Result<ThenChange> {
         let then_change_target = then_change_target.trim();
@@ -366,9 +365,6 @@ impl File {
         for target in split_by_comma {
             let target = target.trim();
             let t = Self::parse_single_then_change_target(path, root_path, target, line_num)?;
-            if let Some(f) = t.file() {
-                files_to_parse.insert(f.to_owned());
-            }
             then_change_targets.push(t);
         }
 
@@ -420,7 +416,6 @@ impl File {
         root_path: &Path,
         parsed: &str,
         line_num: usize,
-        files_to_parse: &mut HashSet<PathBuf>,
         block_stack: &mut Vec<OnChangeBlock>,
     ) -> Result<OnChangeBlock> {
         let mut block = if let Some(block) = block_stack.pop() {
@@ -433,8 +428,7 @@ impl File {
             ));
         };
         block.end_line = line_num as u32;
-        block.then_change =
-            Self::build_then_change(path, root_path, &parsed, files_to_parse, line_num)?;
+        block.then_change = Self::build_then_change(path, root_path, &parsed, line_num)?;
         Ok(block)
     }
 
@@ -473,16 +467,7 @@ impl File {
         mapping[idx].1
     }
 
-    pub fn parse<P: AsRef<Path>>(
-        path: PathBuf,
-        root_path: P,
-    ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
-        let root_path = root_path.as_ref();
-        let path_ref = Arc::new(path.clone());
-
-        // Set of files that need to be parsed based on OnChange targets seen in this file.
-        let mut files_to_parse: HashSet<PathBuf> = HashSet::new();
-
+    pub fn parse_internal(path: Arc<PathBuf>, root_path: &Path) -> Result<Vec<OnChangeBlock>> {
         // Read the entire file into memory. Since we're mostly working with text files,
         // this shouldn't be an issue.
         let mut f = std::fs::File::open(root_path.join(path.as_path()))?;
@@ -512,7 +497,7 @@ impl File {
         }
 
         if matches.is_empty() {
-            return Ok(None);
+            return Ok(blocks);
         }
 
         // Build a mapping from byte position in the file to line number.
@@ -524,7 +509,7 @@ impl File {
             match m {
                 LineMatch::OnChange(..) => {
                     Self::handle_on_change(
-                        path_ref.clone(),
+                        path.clone(),
                         parsed,
                         line_num,
                         &mut block_name_to_start_line,
@@ -537,7 +522,6 @@ impl File {
                         root_path,
                         &parsed,
                         line_num,
-                        &mut files_to_parse,
                         &mut block_stack,
                     )?;
                     blocks.push(block);
@@ -554,6 +538,33 @@ impl File {
                 block.name(),
                 block.start_line,
             ));
+        }
+
+        Ok(blocks)
+    }
+
+    pub fn parse<P: AsRef<Path>>(
+        path: PathBuf,
+        root_path: P,
+    ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
+        let root_path = root_path.as_ref();
+
+        let blocks = Self::parse_internal(Arc::new(path.clone()), root_path.as_ref())?;
+
+        let mut files_to_parse = HashSet::new();
+
+        for block in &blocks {
+            match block.then_change() {
+                ThenChange::Targets(targets) => {
+                    for target in targets {
+                        if let Some(file_path) = target.file() {
+                            files_to_parse.insert(file_path.to_owned());
+                        }
+                    }
+                }
+                ThenChange::NoTarget => (),
+                ThenChange::Unset => unreachable!(),
+            }
         }
 
         Ok(Some((File { path, blocks }, files_to_parse)))

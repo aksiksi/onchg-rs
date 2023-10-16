@@ -121,6 +121,8 @@ impl Parser {
     /// on, recursively.
     ///
     /// TODO(aksiksi): Respect .gitignore and .ignore files via [[ignore]].
+    ///
+    /// NOTE(aksiksi): Work to parallelize the file parsing and traversal logic.
     pub fn from_files<P: AsRef<Path>, Q: AsRef<Path>>(
         paths: impl Iterator<Item = P>,
         root_path: Q,
