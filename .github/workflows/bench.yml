@@ -1,0 +1,40 @@
+name: bench
+
+on:
+  push:
+    paths-ignore:
+      - '**/*.md'
+    branches:
+      - main
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.event.repository.name }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup dummy Git identity
+        run: git config --global user.name "dummy" && git config --global user.email "dummy@example.com"
+      - name: Install ripgrep
+        run: sudo apt-get install ripgrep
+      - name: Run benchmarks
+        run: make bench
+  linux-libgit2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libgit2
+        run:  sudo apt-get install -y libgit2-dev
+      - name: Install ripgrep
+        run: sudo apt-get install ripgrep
+      - name: Setup dummy Git identity
+        run: git config --global user.name "dummy" && git config --global user.email "dummy@example.com"
+      - name: Run benchmarks
+        run: make bench-git
