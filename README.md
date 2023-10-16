@@ -326,9 +326,11 @@ If a target is specified, it can either be a file or a block in a file. The bloc
 
 ## Benchmarks
 
-**Setup:** 10 core VM; AMD 3900x equivalent.
+**Setup:**
 
-**Memory:** ~120MB peak memory usage across all benchmarks.
+* **OS**: Ubuntu 22.04 VM
+* **CPU**: 10-core AMD 3900x equivalent (virtualized)
+* **Disk**: Corsair Force MP510 PCIe Gen3 NVMe drive
 
 `150` and `1000` in the bench names refer to the number of files analyzed.
 
@@ -337,6 +339,9 @@ When compared to `grep`, in addition to finding matches in all files, `onchg` ne
 1. Load the state of all blocks into memory.
 2. Parse and extract the capture group content to ensure that blocks are valid.
 3. Run a validation step across all parsed blocks.
+
+> [!NOTE]
+> All benchmarks are seeded to allow for reproducibility.
 
 ### Sparse
 
@@ -375,3 +380,32 @@ directory-dense/1000    time:   [83.987 ms 84.581 ms 85.224 ms]
 grep-dense/1000         time:   [15.269 ms 15.349 ms 15.430 ms]
 ripgrep-dense/1000      time:   [15.800 ms 15.901 ms 16.004 ms]
 ```
+
+### Git Repo
+
+> [!NOTE]
+> This is also a pathological worst-case benchmark. Blocks randomly depend on other
+> blocks and the graph is large even with relatively few changed blocks.
+
+This is the same as the dense bench above, but we instead randomly modify *200 blocks*,
+stage them, and run `onchg repo`. The bench ends up parsing ~9500 files; the degree of block/file
+connectivity is quite high as noted above. Note that the bench generates a total of ~75000 blocks
+across 1000 files.
+
+```
+git-repo/200            time:   [862.56 ms 866.89 ms 871.40 ms]
+```
+
+#### Why so much slower??
+
+Three reasons:
+
+1. The file walk is **single-threaded**.
+2. Parsing takes a longer time than above (~5x longer!) due to the randomized nature of the walk.
+Each block refers to random blocks in typically distant files, which leads to an essentially **random-access**
+pattern of traversal. In contrast, the directory benches above traverse the directory in more ordered fashion.
+3. It takes a whopping 250ms just to render the staged diff to stdout!
+
+One interesting finding: when using `libgit2` via the `git` feature, the bench takes ~250ms longer. After
+digging into it a bit, it seems that the source of the delay is the diff line iterator in `libgit2`. Somehow,
+it takes 2x longer than rendering the diff to stdout and parsing it!

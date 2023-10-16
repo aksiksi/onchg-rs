@@ -6,6 +6,8 @@ use onchg::Parser;
 const SEED: u64 = 456;
 
 pub fn git_repo(c: &mut Criterion) {
+    env_logger::builder().is_test(true).init();
+
     let d = GitRepo::new();
 
     let s = std::time::Instant::now();
@@ -21,7 +23,12 @@ pub fn git_repo(c: &mut Criterion) {
     }
     d.add_all_files();
 
-    eprintln!("Created random tree & touched {} blocks in {:?}", n, s.elapsed());
+    log::info!(
+        "Created random tree {} & touched {} blocks in {:?}",
+        d.path().display(),
+        n,
+        s.elapsed(),
+    );
 
     c.bench_with_input(BenchmarkId::new("git-repo", n), &d, |b, d| {
         b.iter(|| {

@@ -49,16 +49,37 @@ impl Repo for Repository {
         Ok(paths)
     }
 
-    // NOTE: This is slower than CLI-based diff. See benchmark.
+    // NOTE(aksiksi): This is 2x slower than the CLI-based diff.
+    //
+    // For the "repo" benchmark, which consists of ~2300 diff lines, the CLI takes ~250ms,
+    // while libgit2 takes ~500ms.
+    //
+    // Based on my analysis, it takes no more than 15us to process each line. The combination
+    // of getting the tree and computing the diff is 300us. This implies that most of the time
+    // is spent *in between* each line callback.
+    //
+    // But is there even another way to get hunk content? Based on the API, using the line_cb is
+    // the only way to see diff content.
     fn get_staged_hunks(&self) -> Result<BTreeMap<PathBuf, Vec<Hunk>>> {
         let mut hunk_map: BTreeMap<PathBuf, HashMap<(u32, u32), Hunk>> = BTreeMap::new();
+
+        let s = std::time::Instant::now();
         let tree = self.head()?.peel_to_tree()?;
+        log::info!("Got tree in {:?}", s.elapsed());
+
+        let s = std::time::Instant::now();
         let diff = self.diff_tree_to_index(Some(&tree), None, None)?;
+        log::info!("Diff tree to index in {:?}", s.elapsed());
+
+        let s = std::time::Instant::now();
+        let mut num_lines = 0;
+
         diff.foreach(
             &mut |_delta, _progress| true,
             None,
             None,
             Some(&mut |delta, raw_hunk, line| {
+                let s = std::time::Instant::now();
                 if raw_hunk.is_none() {
                     return true;
                 }
@@ -99,9 +120,17 @@ impl Repo for Repository {
                     .lines
                     .push(line.into());
 
+                // Only log timing for the 1st line.
+                if num_lines == 0 {
+                    log::info!("Handled line in {:?}", s.elapsed());
+                }
+                num_lines += 1;
+
                 true
             }),
         )?;
+
+        log::info!("Processed {} lines in {:?}", num_lines, s.elapsed());
 
         let hunk_map = hunk_map
             .into_iter()

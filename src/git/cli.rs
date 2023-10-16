@@ -9,6 +9,8 @@ use super::{Hunk, Line, Repo};
 
 // Returns the names of non-deleted staged files.
 const STAGED_FILES_CMD: &[&str] = &[
+    // Disable the pager.
+    "--no-pager",
     "diff",
     "--cached",
     "--name-only",
@@ -19,6 +21,8 @@ const STAGED_FILES_CMD: &[&str] = &[
 ];
 // Returns all staged hunks for non-deleted files.
 const STAGED_HUNKS_CMD: &[&str] = &[
+    // Disable the pager.
+    "--no-pager",
     "diff",
     "--cached",
     // Render paths relative to pwd.
