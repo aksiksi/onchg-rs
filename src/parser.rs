@@ -360,8 +360,13 @@ impl Parser {
         log::info!("Got staged files and hunks in {:?}", s.elapsed());
 
         Self::from_files_internal(staged_files.iter(), path, |path, root_path| {
-            let hunks = staged_hunks.get(&path).map(|v| v.as_slice()).unwrap_or(&[]);
-            File::parse(path, root_path, Some(hunks))
+            let hunks = staged_hunks.get(&path).map(|v| v.as_slice());
+            if let Some(hunks) = hunks {
+                File::parse(path, root_path, Some(hunks))
+            } else {
+                // If there are no staged hunks for this file, we actually don't need to parse it at all :)
+                Ok(None)
+            }
         })
     }
 

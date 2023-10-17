@@ -595,13 +595,6 @@ impl File {
     ) -> Result<Option<(Self, HashSet<PathBuf>)>> {
         let root_path = root_path.as_ref();
 
-        // If there are no staged hunks for this file, we actually don't need to parse it at all :)
-        if let Some(hunks) = hunks {
-            if hunks.len() == 0 {
-                return Ok(None);
-            }
-        }
-
         let mut blocks = Self::parse_internal(Arc::new(path.clone()), root_path.as_ref())?;
 
         // If a set of hunks was provided, filter out blocks that have not been changed by a hunk.
