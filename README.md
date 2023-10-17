@@ -26,6 +26,10 @@ cargo install onchg
 
 ## Quickstart
 
+### Video
+
+https://www.loom.com/share/4018aea2378f4e4e8fcd403a70749cde?sid=19f4c8ec-87b6-4eac-a448-f326695189ee
+
 ### Setup
 
 Create an empty directory:
