@@ -352,6 +352,8 @@ If a target is specified, it can either be a file or a block in a file. The bloc
 
 ## Benchmarks
 
+### Synthetic
+
 **Setup:**
 
 * **OS**: Ubuntu 22.04 VM
@@ -369,7 +371,7 @@ When compared to `grep`, in addition to finding matches in all files, `onchg` ne
 > [!NOTE]
 > All benchmarks are seeded to allow for reproducibility.
 
-### Sparse
+#### Sparse
 
 > [!NOTE]
 > This is the more realistic benchmark.
@@ -388,7 +390,7 @@ grep-sparse/1000        time:   [6.4750 ms 6.5380 ms 6.6048 ms]
 ripgrep-sparse/1000     time:   [7.6132 ms 7.6550 ms 7.6980 ms]
 ```
 
-### Dense
+#### Dense
 
 > [!NOTE]
 > This is more of a pathological worst-case benchmark.
@@ -407,7 +409,7 @@ grep-dense/1000         time:   [15.269 ms 15.349 ms 15.430 ms]
 ripgrep-dense/1000      time:   [15.800 ms 15.901 ms 16.004 ms]
 ```
 
-### Git Repo
+#### Git Repo
 
 > [!NOTE]
 > This is also a pathological worst-case benchmark. Blocks randomly depend on other
@@ -422,7 +424,7 @@ across 1000 files.
 git-repo/200            time:   [339.91 ms 340.70 ms 341.53 ms]
 ```
 
-#### Why so much slower??
+##### Why so much slower??
 
 Two reasons:
 
@@ -432,3 +434,41 @@ Two reasons:
 One interesting finding: when using `libgit2` via the `git` feature, the bench takes ~250ms longer. After
 digging into it a bit, it seems that the source of the delay is the diff line iterator in `libgit2`. Somehow,
 it takes 2x longer than rendering the diff to stdout and parsing it!
+
+### Real Codebases
+
+#### Linux
+
+> [!WARNING]
+> This clones the full Linux kernel tree (~2GB) to the current working directory.
+
+```
+$ ./benches/linux.sh
+Number of lines in Linux kernel: 38566988
+Root path: /home/aksiksi/repos/onchg/linux
+
+Parsed 82259 files (2 blocks total):
+  * /home/aksiksi/repos/onchg/linux/.clang-format
+  * /home/aksiksi/repos/onchg/linux/.cocciconfig
+  * /home/aksiksi/repos/onchg/linux/.get_maintainer.ignore
+  * /home/aksiksi/repos/onchg/linux/.gitattributes
+  * /home/aksiksi/repos/onchg/linux/.gitignore
+  * /home/aksiksi/repos/onchg/linux/.mailmap
+  * /home/aksiksi/repos/onchg/linux/.rustfmt.toml
+  * /home/aksiksi/repos/onchg/linux/COPYING
+  * /home/aksiksi/repos/onchg/linux/CREDITS
+  * /home/aksiksi/repos/onchg/linux/Documentation/.gitignore
+  * /home/aksiksi/repos/onchg/linux/Documentation/ABI/README
+  * /home/aksiksi/repos/onchg/linux/Documentation/ABI/obsolete/o2cb
+  * /home/aksiksi/repos/onchg/linux/Documentation/ABI/obsolete/procfs-i8k
+  * /home/aksiksi/repos/onchg/linux/Documentation/ABI/obsolete/sysfs-bus-iio
+  * /home/aksiksi/repos/onchg/linux/Documentation/ABI/obsolete/sysfs-bus-usb
+  ... 82244 files omitted
+
+OK.
+
+real  0m0.628s
+user  0m0.779s
+sys   0m0.974s
+```
+

@@ -244,11 +244,10 @@ impl File {
     /// 2. Relative path: Path is relative to the origin file
     /// 3. //-prefixed path (Bazel convention): Path is relative to the root directory
     ///
-    ///
     /// Relatives path support . and .. prefixes. ".."s must only exist in the prefix of the path.
     /// For example: ../../../abc is supported, but ../a/b/../c is not.
     ///
-    //// Absolute paths are not supported as they do not make sense in repo mode.
+    /// Absolute paths are not supported as they do not make sense in repo mode.
     ///
     /// Examples of each for a file located at "abc/abc.txt" (relative to root):
     ///
