@@ -13,7 +13,7 @@ A tool that allows you to keep blocks in sync across different files in your cod
 
 ```yaml
 - repo: https://github.com/aksiksi/onchg-rs
-  rev: v0.1.5
+  rev: v0.1.6
   hooks:
     - id: onchg
 ```
@@ -88,7 +88,7 @@ Create a `pre-commit` config and install the hook:
 cat >.pre-commit-config.yaml <<EOL
 repos:
   - repo: https://github.com/aksiksi/onchg-rs
-    rev: v0.1.5
+    rev: v0.1.6
     hooks:
       - id: onchg
 EOL
