@@ -1021,6 +1021,67 @@ mod test {
     }
 
     #[test]
+    fn test_from_git_repo_multiple_target_files() {
+        let files = &[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n
+                 abdbbda\nadadd\n
+                 LINT.ThenChange(f2.txt)\n",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(potato)\n
+                 LINT.ThenChange(f1.txt)\n",
+            ),
+            (
+                "f3.txt",
+                "LINT.OnChange()\n
+                 LINT.ThenChange(f1.txt, f2.txt, f4.txt)\n",
+            ),
+            (
+                "f4.txt",
+                "LINT.OnChange(something)\n
+                 LINT.ThenChange(f1.txt, f2.txt)\n",
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Add a line to f3 and stage it.
+        d.write_and_add_files(&[(
+            "f3.txt",
+            "LINT.OnChange()\n
+             hello,there!\n
+             LINT.ThenChange(f1.txt, f2.txt, f4.txt)\n",
+        )]);
+        parse_and_validate(d.path(), 3);
+
+        // Now stage the other files and ensure the parser succeeds.
+        d.write_and_add_files(&[
+            (
+                "f1.txt",
+                "LINT.OnChange(default)\n
+                 adadd\n
+                 LINT.ThenChange(f2.txt)\n",
+            ),
+            (
+                "f2.txt",
+                "LINT.OnChange(potato)\n
+                 adadd\n
+                 LINT.ThenChange(f1.txt)\n",
+            ),
+            (
+                "f4.txt",
+                "LINT.OnChange(something)\n
+                 newlinehere\n\n
+                 LINT.ThenChange(f1.txt, f2.txt)\n",
+            ),
+        ]);
+        parse_and_validate(d.path(), 0);
+    }
+
+
+    #[test]
     fn test_from_git_repo_nested_blocks() {
         let files = &[
             (
