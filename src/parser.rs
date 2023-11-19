@@ -1080,7 +1080,6 @@ mod test {
         parse_and_validate(d.path(), 0);
     }
 
-
     #[test]
     fn test_from_git_repo_nested_blocks() {
         let files = &[
@@ -1204,5 +1203,66 @@ mod test {
                 "},
         )]);
         parse_and_validate(d.path(), 1);
+    }
+
+    #[test]
+    fn test_from_git_repo_root_paths() {
+        let files = &[
+            (
+                "f1.txt",
+                indoc! {"
+                    LINT.OnChange(first)
+                    LINT.ThenChange(f2.txt:second)\n
+                "},
+            ),
+            (
+                "f2.txt",
+                indoc! {"
+                    LINT.OnChange(second)\n
+                    LINT.ThenChange(//abc/f3.txt:third)\n
+                "},
+            ),
+            (
+                "abc/f3.txt",
+                indoc! {"
+                    LINT.OnChange(third)\n
+                    LINT.ThenChange(//f1.txt)\n
+                "},
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Add one line to f1 and f2 and stage them.
+        d.write_and_add_files(&[
+            (
+                "f1.txt",
+                indoc! {"
+                    LINT.OnChange(first)
+                    HELLO
+                    LINT.ThenChange(f2.txt:second)\n
+                "},
+            ),
+            (
+                "f2.txt",
+                indoc! {"
+                    LINT.OnChange(second)
+                    HELLO THERE
+                    LINT.ThenChange(//abc/f3.txt:third)\n
+                "},
+            ),
+        ]);
+        parse_and_validate(d.path(), 1);
+
+        // Stage f3 and ensure there are no violations.
+        // Add one line to f1 and f2 and stage them.
+        d.write_and_add_files(&[(
+            "abc/f3.txt",
+            indoc! {"
+                LINT.OnChange(third)\n
+                HIYA!
+                LINT.ThenChange(//f1.txt)\n
+            "},
+        )]);
+        parse_and_validate(d.path(), 0);
     }
 }
