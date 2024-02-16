@@ -370,7 +370,7 @@ impl Parser {
         })
     }
 
-    // For each block in the set, check the OnChange target(s) and ensure that they have also changed.
+    // For each block in the set, check the ThenChange target(s) and ensure that they have also changed.
     // This will happen _recursively_ for all ThenChange targets. If a violation is detected, it will
     // be returned.
     fn validate_changed_files_and_blocks<'a, 'b>(
@@ -386,21 +386,25 @@ impl Parser {
 
         for block in blocks_changed {
             let blocks_to_check = block.get_then_change_targets_as_keys();
-            for (on_change_file, on_change_block) in blocks_to_check {
-                if let Some(on_change_block) = on_change_block {
-                    if !targetable_blocks_changed.contains(&(on_change_file, on_change_block)) {
+            for (then_change_file, then_change_block_name) in blocks_to_check {
+                if let Some(then_change_block_name) = then_change_block_name {
+                    if !targetable_blocks_changed.contains(&(then_change_file, then_change_block_name)) {
+                        // TODO(aksiksi): We currently only report the unchanged block name. In order to
+                        // be able to report its location, we'll need to lazily parse the then change file
+                        // at this point. We might not find the block, in which case we can report an error.
+                        // If we do find the block, we can use its location as part of the returned violation.
                         violations.push(OnChangeViolation {
                             root_path: &self.root_path,
                             block,
-                            target_file: on_change_file,
-                            target_block_name: Some(on_change_block),
+                            target_file: then_change_file,
+                            target_block_name: Some(then_change_block_name),
                         });
                     }
-                } else if !files_changed.contains(on_change_file) {
+                } else if !files_changed.contains(then_change_file) {
                     violations.push(OnChangeViolation {
                         root_path: &self.root_path,
                         block,
-                        target_file: on_change_file,
+                        target_file: then_change_file,
                         target_block_name: None,
                     });
                 }
