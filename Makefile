@@ -30,4 +30,8 @@ coverage:
 fmt:
 	cargo fmt
 
-.PHONY: all bench bench-git build check ci coverage fmt test
+flake:
+	nix build -L .#packages.x86_64-linux.default
+
+.PHONY: all bench bench-git build check ci coverage flake fmt test
+
