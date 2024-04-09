@@ -47,6 +47,7 @@ jobs:
         with:
           fail_ci_if_error: true
           files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
   linux-build-flake:
     runs-on: ubuntu-latest
     steps:
