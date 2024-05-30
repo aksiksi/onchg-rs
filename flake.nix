@@ -40,7 +40,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in {
         default = pkgs.mkShell {
-          buildInputs = [ pkgs.cargo pkgs.libgit2 ];
+          buildInputs = [ pkgs.cargo pkgs.libgit2 pkgs.rustc pkgs.rust-analyzer pkgs.rustfmt ];
         };
       }
     );

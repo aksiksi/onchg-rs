@@ -388,7 +388,9 @@ impl Parser {
             let blocks_to_check = block.get_then_change_targets_as_keys();
             for (then_change_file, then_change_block_name) in blocks_to_check {
                 if let Some(then_change_block_name) = then_change_block_name {
-                    if !targetable_blocks_changed.contains(&(then_change_file, then_change_block_name)) {
+                    if !targetable_blocks_changed
+                        .contains(&(then_change_file, then_change_block_name))
+                    {
                         // TODO(aksiksi): We currently only report the unchanged block name. In order to
                         // be able to report its location, we'll need to lazily parse the then change file
                         // at this point. We might not find the block, in which case we can report an error.
@@ -1302,16 +1304,14 @@ mod test {
 
         // Add one line to f1 and stage. Ensure we have no violations due to
         // f2 already being staged.
-        d.write_and_add_files(&[
-            (
-                "f1.txt",
-                indoc! {"
+        d.write_and_add_files(&[(
+            "f1.txt",
+            indoc! {"
                     LINT.OnChange(first)
                     SOME LINE
                     LINT.ThenChange(f2.txt)\n
                 "},
-            ),
-        ]);
+        )]);
         parse_and_validate(d.path(), 0);
     }
 }
