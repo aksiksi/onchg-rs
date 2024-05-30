@@ -1269,4 +1269,49 @@ mod test {
         )]);
         parse_and_validate(d.path(), 0);
     }
+
+    #[test]
+    fn test_git_repo_one_way_block() {
+        let files = &[
+            (
+                "f1.txt",
+                indoc! {"
+                    LINT.OnChange(first)
+                    LINT.ThenChange(f2.txt)\n
+                "},
+            ),
+            (
+                "f2.txt",
+                indoc! {"
+                    Hello, there!
+                "},
+            ),
+        ];
+        let d = GitRepo::from_files(files);
+
+        // Add a line to f2 and stage. This should be fine because f2 does not
+        // have any deps.
+        d.write_and_add_files(&[(
+            "f2.txt",
+            indoc! {"
+                Hello, there!
+                Hey!
+            "},
+        )]);
+        parse_and_validate(d.path(), 0);
+
+        // Add one line to f1 and stage. Ensure we have no violations due to
+        // f2 already being staged.
+        d.write_and_add_files(&[
+            (
+                "f1.txt",
+                indoc! {"
+                    LINT.OnChange(first)
+                    SOME LINE
+                    LINT.ThenChange(f2.txt)\n
+                "},
+            ),
+        ]);
+        parse_and_validate(d.path(), 0);
+    }
 }
