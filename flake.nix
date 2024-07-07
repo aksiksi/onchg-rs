@@ -3,9 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nix-pre-commit.url = "github:jmgilman/nix-pre-commit";
+    nix-pre-commit.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, ... }: let
+  outputs = { self, nixpkgs, nix-pre-commit, ... }: let
     supportedSystems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     pname = "onchg";
@@ -31,6 +33,28 @@
           doCheck = false;
         };
       }
+    );
+
+    shellHook = forAllSystems (system:
+      (nix-pre-commit.lib.${system}.mkConfig {
+        pkgs = nixpkgs.legacyPackages.${system};
+        config = {
+          repos = [
+            {
+              repo = "local";
+              hooks = [
+                {
+                  id = "onchg";
+                  language = "system";
+                  entry = "${self.packages.${system}.default}/bin/onchg repo";
+                  types = [ "text" ];
+                  pass_filenames = false;
+                }
+              ];
+            }
+          ];
+        };
+      }).shellHook
     );
 
     # Development shell
