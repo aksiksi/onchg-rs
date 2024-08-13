@@ -3,8 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    nix-pre-commit.url = "github:jmgilman/nix-pre-commit";
-    nix-pre-commit.inputs.nixpkgs.follows = "nixpkgs";
+    nix-pre-commit = {
+      url = "github:jmgilman/nix-pre-commit";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = { self, nixpkgs, nix-pre-commit, ... }: let
@@ -22,7 +24,7 @@
           inherit pname;
           inherit version;
           src = ./.;
-          cargoSha256 = "sha256-/YRvUALUTg+wYhPr21cS5HQj9+kLVdFHG9JKYOPMJJc";
+          cargoSha256 = "sha256-vcsZ5zhqqSI1cVO3FKxOePFqsB45Pk5mHpm4xXaRv+E";
           meta = {
             description = "A tool that allows you to keep blocks in sync across different files in your codebase.";
             homepage = "https://github.com/aksiksi/onchg-rs";
@@ -64,7 +66,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in {
         default = pkgs.mkShell {
-          buildInputs = [ pkgs.cargo pkgs.libgit2 pkgs.rustc pkgs.rust-analyzer pkgs.rustfmt ];
+          buildInputs = [ pkgs.cargo pkgs.libgit2 pkgs.rust-analyzer pkgs.rustc pkgs.rustfmt ];
         };
       }
     );
