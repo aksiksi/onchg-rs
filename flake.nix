@@ -24,7 +24,7 @@
           inherit pname;
           inherit version;
           src = ./.;
-          cargoSha256 = "sha256-vcsZ5zhqqSI1cVO3FKxOePFqsB45Pk5mHpm4xXaRv+E";
+          cargoSha256 = "sha256-t34KF87WPSDUBynLRZbmexEWvqYrddD9+YlhgpyWxWo=";
           meta = {
             description = "A tool that allows you to keep blocks in sync across different files in your codebase.";
             homepage = "https://github.com/aksiksi/onchg-rs";
