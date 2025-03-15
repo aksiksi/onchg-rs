@@ -24,7 +24,7 @@
           inherit pname;
           inherit version;
           src = ./.;
-          cargoSha256 = "sha256-t34KF87WPSDUBynLRZbmexEWvqYrddD9+YlhgpyWxWo=";
+          cargoHash = "sha256-cenRejcMSblnXeVCW2qeZzne8YEaiL/LYDh18KqQ3aM=";
           meta = {
             description = "A tool that allows you to keep blocks in sync across different files in your codebase.";
             homepage = "https://github.com/aksiksi/onchg-rs";
@@ -33,6 +33,7 @@
           };
           # Do not run tests; they rely on the filesystem.
           doCheck = false;
+          useFetchCargoVendor = true;
         };
       }
     );

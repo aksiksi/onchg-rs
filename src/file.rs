@@ -192,7 +192,7 @@ impl OnChangeBlock {
     /// If a target has no path set, it will be replaced with this block's file path.
     pub fn get_then_change_targets_as_keys<'a>(
         &'a self,
-    ) -> Box<dyn Iterator<Item = (&Path, Option<&str>)> + 'a> {
+    ) -> Box<dyn Iterator<Item = (&'a Path, Option<&'a str>)> + 'a> {
         match &self.then_change {
             ThenChange::NoTarget | ThenChange::Unset => Box::new(std::iter::empty()),
             ThenChange::Targets(targets) => Box::new(
